@@ -1,5 +1,7 @@
 import json
 import datetime
+import gym
+import numpy as np
 import pandas as pd
 
 
@@ -7,38 +9,64 @@ import pandas as pd
 # ---------------------------- Description --------------------------------- #
 # -------------------------------------------------------------------------- #
 # This script contains two classes,
-# > DRLOutput:
-#   > Input: DRL model
-#   > Output: JSON of DRL output.
+# > OutputWrapper:
+#   > Input: DRL models
+#   > Output: JSON/dictionaries of DRL output.
 #   > Description: This is an edited version of the output wrapper we've been using.
 #       All extraneous or redundant information has been removed.
-# > FlattenOutput:
-#   > Input: JSON created by DRLOutput
+# > OutputToDict:
+#   > Input: JSON/dictionaries created by DRLOutput
 #   > Output: Dictionary of tables corresponding to the tables defined in
-#       'DRL Data Dictionary.xlsx'.
+#       'DRL Data Dictionary.xlsx'; can also bulk append output to database.
 #   > Description: Flattens the JSON from DRLOutput into DataFrames that will be
 #       added to the API database (\app\data_models.py)
 
 
 # -------------------------------------------------------------------------- #
-# ------------- DRLOutput(ModelObject): model output wrapper --------------- #
+# ------------- OutputWrapper(ModelObject): models output wrapper --------------- #
 # -------------------------------------------------------------------------- #
 # Edited version of original DRL output wrapper
-class DRLOutput(ModelObject):
-    def __init__(self, env, log_file = 'output.json', param_file = 'param.json'):
-        super(DRLOutput, self).__init__(env)
-        self.run_date = datetime.datetime.now()
+class OutputWrapper(gym.Wrapper):
+    def __init__(self,
+                 env,
+                 env_type,
+                 environment_params,
+                 model_params,
+                 log_file='output.json',
+                 param_file='param.json'
+                 ):
+        super(OutputWrapper, self).__init__(env)
+        self.run_date = datetime.datetime.now().strftime('%Y%m%d_%H%M_%S')
+        self.env_type = env_type
+        self.environment_params= environment_params
+        self.model_params= model_params
         self.log_file = log_file
         self.param_file = param_file
-        self.agents = self.env.nr_agents
         self.episode_rewards = []
         self.episode = 0
         self.log_data = []
+        self.param_data =[]
+
+
+    def run_parameters(self, **kwargs):
+        env_entry = {}
+        for de, val in self.environment_params.items():
+            env_entry[de] = val
+
+        model_entry = {}
+        for de, val in self.model_params.items():
+            model_entry[de] = val
+
+        param_entry = {'environment_id':self.env_type,
+                       **env_entry, **model_entry}
+
+        self.param_data.append(param_entry)
 
     def reset(self, **kwargs):
         """Resets the environment and initializes logging for a new episode."""
         self.episode_rewards = []
         self.episode = 0
+        return self.env.reset(**kwargs)
 
     # Primary function, extracts output
     def step(self, action):
@@ -47,10 +75,10 @@ class DRLOutput(ModelObject):
         next_state, reward, done, info = self.env.step(action)
 
         log_entry = {
-            "n_drones": self.agents,
+            "n_drones": self.env.nr_agents,
             "step": self.episode,
             "run_date": self.run_date,
-            "terminal": info["done"],
+            "terminal": done,
             "global_state": state,
             "local_state": info["state"],
             "actions": info["actions"],
@@ -65,39 +93,59 @@ class DRLOutput(ModelObject):
 
         return next_state, reward, done, info
 
+    def convert_ndarray(self, item):
+        """Recursively convert numpy arrays to lists."""
+        if isinstance(item, np.ndarray):
+            return item.tolist()
+        elif isinstance(item, dict):
+            return {k: self.convert_ndarray(v) for k, v in item.items()}
+        elif isinstance(item, list):
+            return [self.convert_ndarray(i) for i in item]
+        else:
+            return item
 
     def close(self):
-        # Convert the log data to be JSON serializable
+        self.run_parameters()
+        serializable_param_data = self.convert_ndarray(self.param_data)
+        print(serializable_param_data)
         serializable_log_data = self.convert_ndarray(self.log_data)
 
-        # Print for debugging
-        print("Writing log data to", self.log_file)
+        print("Writing param data to", self.param_file)
+        with open(self.param_file, 'w') as f:
+            json.dump(serializable_param_data, f, indent=4)
 
-        # Write log data to the log file
+        print("Writing log data to", self.log_file)
         with open(self.log_file, 'w') as f:
             json.dump(serializable_log_data, f, indent=4)
 
         # Close the environment
-        super(DRLOutput, self).close()
+        super(OutputWrapper, self).close()
 
 # -------------------------------------------------------------------------- #
-# ------------- FlattenOutput: converts output to DataFrames --------------- #
+# ------------- ModelOutput: converts output to DataFrames --------------- #
 # -------------------------------------------------------------------------- #
 # All functions except the last generate a specific table as documented
 # in 'DRL Data Dictionary.xlsx.'
 # The final function adds a primary key, 'run_id', to each table
 
-class FlattenOutput:
-    def __init__(self, output, output_type='json'):
+class ModelOutput:
+    def __init__(self, output, params, output_type='json'):
         self.output = output
+        self.params = params
         self.output_type = output_type
+        self.tables = {}
 
-    def make_tbl_model_run(self):
+
+    def make_tbl_model_runs(self):
         run_date = self.output[0]["run_date"]
-        terminal_episode = [i["terminal"] for i in range(len(self.output))].index(True)
+        terminal_episode = [self.output[i]["terminal"] for i in range(len(self.output))].index(True)
 
-        return(pd.DataFrame({'run_date': run_date,
-                             'terminal_episode': terminal_episode}))
+        return(pd.DataFrame({'run_date': [run_date],
+                             'terminal_episode': [terminal_episode]}))
+
+    def make_tbl_model_run_params(self):
+
+        return pd.DataFrame(self.params, index=[0])
 
     def make_tbl_local_state(self):
         episodes = []
@@ -113,15 +161,15 @@ class FlattenOutput:
             episodes.append(es)
             ds = [i+1 for i in range(self.output[0]["n_drones"])]
             drones.append(ds)
-            xs = self.output[episode]["state"][0]
+            xs = self.output[episode]["local_state"][0]
             x_coords.append(xs)
-            ys = self.output[episode]["state"][1]
+            ys = self.output[episode]["local_state"][1]
             y_coords.append(ys)
-            os = self.output[episode]["state"][2]
+            os = self.output[episode]["local_state"][2]
             orientation.append(os)
-            lvs = self.output[episode]["state"][3]
+            lvs = self.output[episode]["local_state"][3]
             linear_velocity.append(lvs)
-            avs = self.output[episode]["state"][4]
+            avs = self.output[episode]["local_state"][4]
             angular_velocity.append(avs)
 
         return(pd.DataFrame({
@@ -176,16 +224,15 @@ class FlattenOutput:
         }))
 
     def generate_tables(self):
-        # run id is the timestamp for the model's run
+        # run id is the timestamp for the models's run
         run_id = round(datetime.datetime.now().timestamp(),0)
-        tables = {'tbl_model_runs': self.make_tbl_model_runs(),
+        self.tables = {'tbl_model_runs': self.make_tbl_model_runs(),
+                       'tbl_model_run_params': self.make_tbl_model_run_params(),
                     'tbl_local_state': self.make_tbl_local_state(),
                     'tbl_global_state': self.make_tbl_global_state(),
                     'tbl_drone_actions': self.make_tbl_drone_actions(),
                     'tbl_rewards': self.make_tbl_rewards()}
 
-        for name, tbl in tables.items():
+        for name, tbl in self.tables.items():
             tbl.insert(0, 'run_id', run_id)
-
-        return tables
 
