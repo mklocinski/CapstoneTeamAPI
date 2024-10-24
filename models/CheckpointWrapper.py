@@ -35,22 +35,22 @@ def record_model_episode(current_episode):
 
 def save_checkpoint(action_wrapper, episodes_so_far, timesteps_so_far, iters_so_far):
     print("Saving checkpoint...")
-    action_wrapper.save("checkpoint.pkl")
+    action_wrapper.save("utils\pickles\checkpoint.pkl")
 
     counters = {
         'episodes_so_far': episodes_so_far,
         'timesteps_so_far': timesteps_so_far,
         'iters_so_far': iters_so_far
     }
-    with open("checkpoint_counters.pkl", "wb") as f:
+    with open("utils\pickles\checkpoint_counters.pkl", "wb") as f:
         pickle.dump(counters, f)
 
     print("Checkpoint saved.")
 
 def load_checkpoint(policy_fn, env):
-    action_wrapper = ActWrapper.load("checkpoint.pkl", policy_fn)
+    action_wrapper = ActWrapper.load("utils\pickles\checkpoint.pkl", policy_fn)
 
-    with open('checkpoint_counters.pkl', 'rb') as f:
+    with open('utils\pickles\checkpoint_counters.pkl', 'rb') as f:
         counters = pickle.load(f)
 
     return action_wrapper, counters["episodes_so_far"], counters["timesteps_so_far"], counters["iters_so_far"],

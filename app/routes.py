@@ -42,7 +42,7 @@ def check_for_data_batches():
     batch_number = 0
 
     while True:
-        file = 'model_output.pkl'
+        file = 'utils\pickles\model_output.pkl'
         if os.path.exists(file):
             with open(file, 'rb') as f:
                 batched_data = pickle.load(f)
@@ -100,8 +100,8 @@ def post_model_run():
         print(f"stderr: {result.stderr}")
 
         if result.returncode == 0:
-            if os.path.exists('model_output.pkl'):
-                with open('model_output.pkl', 'rb') as f:
+            if os.path.exists('utils\pickles\model_output.pkl'):
+                with open('utils\pickles\model_output.pkl', 'rb') as f:
                     model_output = pickle.load(f)
             else:
                 print("model_output.pkl not found!")
@@ -159,8 +159,8 @@ def run_xrai_system():
         c.execute('''UPDATE status SET state = "running"''')
         conn.commit()
         conn.close()
-        current_state = "checkpoint.pkl"
-        current_count = "checkpoint_counters.pkl"
+        current_state = "utils\pickles\checkpoint.pkl"
+        current_count = "utils\pickles\checkpoint_counters.pkl"
         command = [
             venv_python,
             os.path.join(project_root, 'models', 'xrai_runfile.py'),
@@ -177,7 +177,7 @@ def run_xrai_system():
     try:
         print("Running Model...")
         model_status = {"status": "running"}
-        with open("model_status.pkl", "wb") as f:
+        with open("utils\pickles\model_status.pkl", "wb") as f:
             pickle.dump(model_status, f)
         result = subprocess.run(command, capture_output=True, text=True)
         print("RESULT! " + str(result.returncode))
@@ -185,8 +185,8 @@ def run_xrai_system():
         print(f"stderr: {result.stderr}")
 
         if result.returncode == 0:
-            if os.path.exists('model_output.pkl'):
-                with open('model_output.pkl', 'rb') as f:
+            if os.path.exists('utils\pickles\model_output.pkl'):
+                with open('utils\pickles\model_output.pkl', 'rb') as f:
                     model_output = pickle.load(f)
             else:
                 print("model_output.pkl not found!")
@@ -246,7 +246,7 @@ def post_pause_model():
 @main.route(rule='/model/play', methods=['POST'])
 def post_play_model():
     model_status = {"status": "running"}
-    with open("model_status.pkl", "wb") as f:
+    with open("utils\pickles\model_status.pkl", "wb") as f:
         pickle.dump(model_status, f)
     return jsonify(model_status)
 

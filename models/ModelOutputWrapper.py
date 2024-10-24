@@ -306,14 +306,14 @@ class OutputObject:
 
     def pickle_tables(self):
 
-        with open("model_output.pkl", "wb") as f:
+        with open("utils\pickles\model_output.pkl", "wb") as f:
             pickle.dump(self.tables, f)
 
         print("Model output pickled")
 
     #def debug_pickle(self):
 
-        #with open("debug.pkl", "wb") as f:
+        #with open("utils\pickles\debug.pkl", "wb") as f:
             #pickle.dump(self.output[0], f)
 
 # -------------------------------------------------------------------------- #
