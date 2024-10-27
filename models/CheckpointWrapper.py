@@ -11,46 +11,43 @@ from deep_rl_for_swarms.common.cg import cg
 from contextlib import contextmanager
 from deep_rl_for_swarms.common.act_wrapper import ActWrapper
 import pickle
-import sqlite3
+from sqlalchemy import text
+from app import db
 
 
 # -------------------------------------------------------------------------- #
 # ------------------------ Checkpoint Helper Functions --------------------- #
 # -------------------------------------------------------------------------- #
 def check_model_status():
-    conn = sqlite3.connect('model_status.db')
-    c = conn.cursor()
-    c.execute('''SELECT state FROM status''')
-    status = c.fetchone()[0]
+    status = db.session.execute(text('SELECT state FROM status')).scalar()
     return status
 
+
 def record_model_episode(current_episode):
-    conn = sqlite3.connect('model_status.db')
-    c = conn.cursor()
-    update_query = '''UPDATE status SET episode = ? WHERE state = "running"'''
-    c.execute(update_query, (current_episode,))
-    conn.commit()
-    conn.close()
+    update_query = text('''UPDATE status SET episode = :current_episode WHERE state = 'running' ''')
+    db.session.execute(update_query, {"current_episode": current_episode})
+    db.session.commit()
 
 
 def save_checkpoint(action_wrapper, episodes_so_far, timesteps_so_far, iters_so_far):
     print("Saving checkpoint...")
-    action_wrapper.save("utils\pickles\checkpoint.pkl")
+    action_wrapper.save("utils/pickles/checkpoint.pkl")
 
     counters = {
         'episodes_so_far': episodes_so_far,
         'timesteps_so_far': timesteps_so_far,
         'iters_so_far': iters_so_far
     }
-    with open("utils\pickles\checkpoint_counters.pkl", "wb") as f:
+    with open("utils/pickles/checkpoint_counters.pkl", "wb") as f:
         pickle.dump(counters, f)
 
     print("Checkpoint saved.")
 
-def load_checkpoint(policy_fn, env):
-    action_wrapper = ActWrapper.load("utils\pickles\checkpoint.pkl", policy_fn)
 
-    with open('utils\pickles\checkpoint_counters.pkl', 'rb') as f:
+def load_checkpoint(policy_fn, env):
+    action_wrapper = ActWrapper.load("utils/pickles/checkpoint.pkl", policy_fn)
+
+    with open('utils/pickles/checkpoint_counters.pkl', 'rb') as f:
         counters = pickle.load(f)
 
     return action_wrapper, counters["episodes_so_far"], counters["timesteps_so_far"], counters["iters_so_far"],
@@ -99,13 +96,7 @@ def traj_segment_generator(pi, env, horizon, stochastic):
     while True:
         prevac = ac[sub_sample_idx] if sub_sample else ac
         ac, vpred = pi.act(stochastic, np.vstack(ob))
-        # Slight weirdness here because we need value function at time T
-        # before returning segment [0, T-1] so we get the correct
-        # terminal value
         if t > 0 and t % horizon == 0:
-            # yield {"ob" : obs, "rew" : rews, "vpred" : vpreds, "new" : news,
-            #         "ac" : acs, "prevac" : prevacs, "nextvpred": vpred * (1 - new),
-            #         "ep_rets" : ep_rets, "ep_lens" : ep_lens}
             yield [
                 dict(
                     ob=np.array(obs[:, na, :]),
@@ -121,8 +112,6 @@ def traj_segment_generator(pi, env, horizon, stochastic):
                 ) for na in range(min(n_agents, sub_sample_thresh))
             ]
             _, vpred = pi.act(stochastic, ob)
-            # Be careful!!! if you change the downstream algorithm to aggregate
-            # several of these batches, then be sure to do a deepcopy
             ep_rets = []
             ep_lens = []
             time_steps = []
@@ -149,7 +138,7 @@ def traj_segment_generator(pi, env, horizon, stochastic):
 
 
 def add_vtarg_and_adv(seg, gamma, lam):
-    new = [np.append(p["new"], 0) for p in seg]  # last element is only used for last vtarg, but we already zeroed it if last new = 1
+    new = [np.append(p["new"], 0) for p in seg]
     vpred = [np.append(p["vpred"], p["nextvpred"]) for p in seg]
 
     for i, p in enumerate(seg):
@@ -163,42 +152,30 @@ def add_vtarg_and_adv(seg, gamma, lam):
             gaelam[t] = lastgaelam = delta + gamma * lam * nonterminal * lastgaelam
         p["tdlamret"] = p["adv"] + p["vpred"]
 
+
 def flatten_lists(listoflists):
     return [el for list_ in listoflists for el in list_]
+
 
 # -------------------------------------------------------------------------- #
 # ------------------------ learn_with_checkpoints() ------------------------ #
 # -------------------------------------------------------------------------- #
 
-
 def learn_with_checkpoints(env, policy_fn, *,
-        timesteps_per_batch, # what to train on
-        max_kl, cg_iters,
-        gamma, lam, # advantage estimation
-        entcoeff=0.0,
-        cg_damping=1e-2,
-        vf_stepsize=3e-4,
-        vf_iters =3,
-        max_timesteps=0, max_episodes=0, max_iters=0,  # time constraint
-        callback=None,
-        act_wrapper=None,
-        episodes_so_far=0,
-        timesteps_so_far=0,
-        iters_so_far=0
-        ):
-    global model_status
-
+                           timesteps_per_batch, max_kl, cg_iters,
+                           gamma, lam, entcoeff=0.0, cg_damping=1e-2,
+                           vf_stepsize=3e-4, vf_iters=3, max_timesteps=0, max_episodes=0, max_iters=0,
+                           callback=None, act_wrapper=None, episodes_so_far=0, timesteps_so_far=0, iters_so_far=0):
     nworkers = MPI.COMM_WORLD.Get_size()
     rank = MPI.COMM_WORLD.Get_rank()
     np.set_printoptions(precision=3)
-    # Setup losses and stuff
-    # ----------------------------------------
+
     ob_space = env.observation_space
     ac_space = env.action_space
     pi = policy_fn("pi", ob_space, ac_space)
     oldpi = policy_fn("oldpi", ob_space, ac_space)
-    atarg = tf.placeholder(dtype=tf.float32, shape=[None])  # Target advantage function (if applicable)
-    ret = tf.placeholder(dtype=tf.float32, shape=[None])  # Empirical return
+    atarg = tf.placeholder(dtype=tf.float32, shape=[None])
+    ret = tf.placeholder(dtype=tf.float32, shape=[None])
 
     ob = U.get_placeholder_cached(name="ob")
     ac = pi.pdtype.sample_placeholder([None])
@@ -211,7 +188,7 @@ def learn_with_checkpoints(env, policy_fn, *,
 
     vferr = tf.reduce_mean(tf.square(pi.vpred - ret))
 
-    ratio = tf.exp(pi.pd.logp(ac) - oldpi.pd.logp(ac))  # advantage * pnew / pold
+    ratio = tf.exp(pi.pd.logp(ac) - oldpi.pd.logp(ac))
     surrgain = tf.reduce_mean(ratio * atarg)
 
     optimgain = surrgain + entbonus
@@ -237,7 +214,7 @@ def learn_with_checkpoints(env, policy_fn, *,
         sz = U.intprod(shape)
         tangents.append(tf.reshape(flat_tangent[start:start + sz], shape))
         start += sz
-    gvp = tf.add_n([tf.reduce_sum(g * tangent) for (g, tangent) in zipsame(klgrads, tangents)])  # pylint: disable=E1111
+    gvp = tf.add_n([tf.reduce_sum(g * tangent) for (g, tangent) in zipsame(klgrads, tangents)])
     fvp = U.flatgrad(gvp, var_list)
 
     assign_old_eq_new = U.function([], [], updates=[tf.assign(oldv, newv)
@@ -270,6 +247,7 @@ def learn_with_checkpoints(env, policy_fn, *,
         'ob_space': ob_space,
         'ac_space': ac_space,
     }
+
     # -------------------------------------------------------------------------- #
     # Checks if there is an ActWrapper pickle, if no creates new ActWrapper here #
     # -------------------------------------------------------------------------- #
@@ -277,6 +255,7 @@ def learn_with_checkpoints(env, policy_fn, *,
     if act_wrapper is None:
         act_wrapper = ActWrapper(pi, act_params)
     # -------------------------------------------------------------------------- #
+
     U.initialize()
     th_init = get_flat()
     MPI.COMM_WORLD.Bcast(th_init, root=0)
@@ -284,16 +263,14 @@ def learn_with_checkpoints(env, policy_fn, *,
     vfadam.sync()
     print("Init param sum", th_init.sum(), flush=True)
 
-    # Prepare for rollouts
-    # ----------------------------------------
     seg_gen = traj_segment_generator(act_wrapper, env, timesteps_per_batch, stochastic=True)
 
     episodes_so_far = 0
     timesteps_so_far = 0
     iters_so_far = 0
     tstart = time.time()
-    lenbuffer = deque(maxlen=40)  # rolling buffer for episode lengths
-    rewbuffer = deque(maxlen=40)  # rolling buffer for episode rewards
+    lenbuffer = deque(maxlen=40)
+    rewbuffer = deque(maxlen=40)
 
     assert sum([max_iters > 0, max_timesteps > 0, max_episodes > 0]) == 1
 
@@ -322,11 +299,8 @@ def learn_with_checkpoints(env, policy_fn, *,
         ac = np.concatenate([s['ac'] for s in seg], axis=0)
         atarg = np.concatenate([s['adv'] for s in seg], axis=0)
         tdlamret = np.concatenate([s['tdlamret'] for s in seg], axis=0)
-        vpredbefore = np.concatenate([s["vpred"] for s in seg], axis=0)  # predicted value function before udpate
-        atarg = (atarg - atarg.mean()) / atarg.std()  # standardized advantage function estimate
-
-        # if hasattr(pi, "ret_rms"): pi.ret_rms.update(tdlamret)
-        # if hasattr(pi, "ob_rms"): pi.ob_rms.update(ob) # update running mean/std for policy
+        vpredbefore = np.concatenate([s["vpred"] for s in seg], axis=0)
+        atarg = (atarg - atarg.mean()) / atarg.std()
 
         args = ob, ac, atarg
         fvpargs = [arr[::5] for arr in args]
@@ -334,7 +308,7 @@ def learn_with_checkpoints(env, policy_fn, *,
         def fisher_vector_product(p):
             return allmean(compute_fvp(p, *fvpargs)) + cg_damping * p
 
-        assign_old_eq_new()  # set old parameter values to new parameter values
+        assign_old_eq_new()
         with timed("computegrad"):
             *lossbefore, g = compute_lossandgrad(*args)
         lossbefore = allmean(np.array(lossbefore))
@@ -347,7 +321,6 @@ def learn_with_checkpoints(env, policy_fn, *,
             assert np.isfinite(stepdir).all()
             shs = .5 * stepdir.dot(fisher_vector_product(stepdir))
             lm = np.sqrt(shs / max_kl)
-            # logger.log("lagrange multiplier:", lm, "gnorm:", np.linalg.norm(g))
             fullstep = stepdir / lm
             expectedimprove = g.dot(fullstep)
             surrbefore = lossbefore[0]
@@ -358,7 +331,6 @@ def learn_with_checkpoints(env, policy_fn, *,
                 set_from_flat(thnew)
                 meanlosses = surr, kl, *_ = allmean(np.array(compute_losses(*args)))
                 improve = surr - surrbefore
-                logger.log("Expected: %.3f Actual: %.3f" % (expectedimprove, improve))
                 if not np.isfinite(meanlosses).all():
                     logger.log("Got non-finite value of losses -- bad!")
                 elif kl > max_kl * 1.5:
@@ -367,31 +339,28 @@ def learn_with_checkpoints(env, policy_fn, *,
                     logger.log("surrogate didn't improve. shrinking step.")
                 else:
                     logger.log("Stepsize OK!")
-                    break
+                break
                 stepsize *= .5
             else:
                 logger.log("couldn't compute a good step")
                 set_from_flat(thbefore)
             if nworkers > 1 and iters_so_far % 20 == 0:
-                paramsums = MPI.COMM_WORLD.allgather((thnew.sum(), vfadam.getflat().sum()))  # list of tuples
+                paramsums = MPI.COMM_WORLD.allgather((thnew.sum(), vfadam.getflat().sum()))
                 assert all(np.allclose(ps, paramsums[0]) for ps in paramsums[1:])
+
 
         for (lossname, lossval) in zip(loss_names, meanlosses):
             logger.record_tabular(lossname, lossval)
 
         with timed("vf"):
-
             for _ in range(vf_iters):
-                for (mbob, mbret) in dataset.iterbatches((ob, tdlamret),
-                                                         include_final_partial_batch=False, batch_size=64):
+                for (mbob, mbret) in dataset.iterbatches((ob, tdlamret), include_final_partial_batch=False, batch_size=64):
                     g = allmean(compute_vflossandgrad(mbob, mbret))
                     vfadam.update(g, vf_stepsize)
 
         logger.record_tabular("ev_tdlam_before", explained_variance(vpredbefore, tdlamret))
-
-        # lrlocal = (seg["ep_lens"], seg["ep_rets"]) # local values
-        lrlocal = (seg[0]["ep_lens"], seg[0]["ep_rets"])  # local values
-        listoflrpairs = MPI.COMM_WORLD.allgather(lrlocal)  # list of tuples
+        lrlocal = (seg[0]["ep_lens"], seg[0]["ep_rets"])
+        listoflrpairs = MPI.COMM_WORLD.allgather(lrlocal)
         lens, rews = map(flatten_lists, zip(*listoflrpairs))
         lenbuffer.extend(lens)
         rewbuffer.extend(rews)
@@ -407,7 +376,5 @@ def learn_with_checkpoints(env, policy_fn, *,
         logger.record_tabular("TimestepsSoFar", timesteps_so_far)
         logger.record_tabular("TimeElapsed", time.time() - tstart)
 
-        if rank == 0:
-            logger.dump_tabular()
-
-
+    if rank == 0:
+        logger.dump_tabular()

@@ -1,6 +1,7 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from .data_models import db  # Now importing db from data_models directly
 from .config import Config
 import os
 
@@ -9,19 +10,22 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
-    db = SQLAlchemy()
-    migrate = Migrate()
+    db.init_app(app)  # Initialize db here
+    migrate = Migrate(app, db)
 
-    # Initialize SQLAlchemy and Flask-Migrate
-    db.init_app(app)
-    migrate.init_app(app, db)
-
-    # Import your models so they are registered with SQLAlchemy
-    from . import data_models
-
-    # Import routes from another module (routes.py)
+    # Import routes and register Blueprints
     from .routes import main
     app.register_blueprint(main)
 
+    @app.cli.command("init-db")
+    def init_db_command():
+        """Initialize the database."""
+        with app.app_context():
+            from .routes import init_db
+            init_db()
+            print("Database initialized.")
+
     return app
+
+
+app = create_app()

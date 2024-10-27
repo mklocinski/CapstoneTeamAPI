@@ -1,13 +1,6 @@
 import sys
 import os
-
-
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, project_root)
-os.environ['PYTHONPATH'] = project_root
-
 import pickle
-#from models.drlss.deep_rl_for_swarms.common.sim_policy import episodes
 from ModelOutputWrapper import OutputWrapper, OutputObject
 from CheckpointWrapper import learn_with_checkpoints
 import numpy as np
@@ -18,16 +11,6 @@ from deep_rl_for_swarms.common.act_wrapper import ActWrapper
 from deep_rl_for_swarms.policies import mlp_mean_embedding_policy
 from deep_rl_for_swarms.rl_algo.trpo_mpi import trpo_mpi
 from deep_rl_for_swarms.ma_envs.envs.point_envs import rendezvous
-
-# -------------------------------------------------------------------------- #
-# ---------------------------- Description --------------------------------- #
-# -------------------------------------------------------------------------- #
-# This contains the same contents as the
-# \models\base_model\run_multiagent_trpo.py file, but with an environment
-# that is wrapped in the ModelOutputWrapper logger and Rai[Environment]Wrapper.
-# Running this file is the same as running the original run_multiagent_trpo.py
-# script, but with our specified output being extracted and RAI parameters
-# applied.
 
 # -------------------------------------------------------------------------- #
 # ------------------------ Default Model Vars  ----------------------------- #
@@ -77,7 +60,12 @@ def TrainWrapper(
         print("Session variables...")
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         dstr = datetime.datetime.now().strftime('%Y%m%d_%H%M_%S')
-        log_dir = project_root + '/Output/' + environment + dstr
+
+        # Use os.path.join to handle file paths correctly across platforms
+        log_dir = os.path.join(project_root, 'Output', f"{environment}_{dstr}")
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
         import deep_rl_for_swarms.common.tf_util as U
         sess = U.single_threaded_session()
         sess.__enter__()
@@ -106,9 +94,9 @@ def TrainWrapper(
                                       environment_params=environment_params,
                                       model_params=model_params,
                                       map_object=map_object,
-                                      log_file= log_dir + '/output.json',
-                                      param_file= log_dir + '/param.json',
-                                      map_file= log_dir + '/map.json')
+                                      log_file=os.path.join(log_dir, 'output.json'),
+                                      param_file=os.path.join(log_dir, 'param.json'),
+                                      map_file=os.path.join(log_dir, 'map.json'))
         print("Start training....")
 
         if current_state is None:
@@ -149,8 +137,6 @@ def main(input_environment, input_environment_params, input_model_params, map_ob
                  model_params=input_model_params,
                  map_object=map_object,
                  current_state=current_state)
-
-
 
 
 if __name__ == '__main__':

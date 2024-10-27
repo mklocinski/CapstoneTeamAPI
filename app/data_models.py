@@ -1,9 +1,9 @@
 from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 import os
-from app import db
+from flask_sqlalchemy import SQLAlchemy
 
+db = SQLAlchemy()
 
 class tbl_model_runs(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -89,7 +89,7 @@ class tbl_rai(db.Model):
     cflt_advanced_collision_avoidance_penalty = db.Column(db.Float, unique=False)
     cbln_basic_damage_avoidance = db.Column(db.Boolean, unique=False)
 
-if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
-    app.run(debug=True)
+# if __name__ == "__main__":
+#     with app.app_context():
+#         db.create_all()
+#     app.run(debug=True)
