@@ -265,75 +265,79 @@ def post_live_run_xrai_system():
     rai_params = json.dumps(data.get("rai_parameters"))
     map_params = json.dumps(data.get("map_parameters"))
 
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    venv_python = "/app/model_venv/bin/python"
+    @copy_current_request_context
+    def run_model():
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        venv_python = "/app/model_venv/bin/python"
 
-    # Check the current state of the model from the database
-    status = db.session.execute(text('SELECT state FROM status')).scalar()
+        # Check the current state of the model from the database
+        status = db.session.execute(text('SELECT state FROM status')).scalar()
 
-    if status == "paused":
-        db.session.execute(text('UPDATE status SET state = "running"'))
-        db.session.commit()
-        current_state = "utils/pickles/checkpoint.pkl"
-        current_count = "utils/pickles/checkpoint_counters.pkl"
-        command = [
-            venv_python,
-            os.path.join(project_root, 'models', 'xrai_runfile.py'),
-            environ_params, model_params, map_params, [current_state, current_count]
-        ]
-    else:
-        command = [
-            venv_python,
-            os.path.join(project_root, 'models', 'xrai_runfile.py'),
-            environ_params, model_params, map_params
-        ]
-
-    try:
-        print("Running Model...")
-        model_status = {"status": "running"}
-        with open("utils/pickles/model_status.pkl", "wb") as f:
-            pickle.dump(model_status, f)
-        result = subprocess.run(command, capture_output=True, text=True)
-        print("RESULT! " + str(result.returncode))
-        print(f"stdout: {result.stdout}")
-        print(f"stderr: {result.stderr}")
-
-        if result.returncode == 0:
-            if os.path.exists('utils/pickles/model_output.pkl'):
-                with open('utils/pickles/model_output.pkl', 'rb') as f:
-                    model_output = pickle.load(f)
-            else:
-                print("model_output.pkl not found!")
-                return jsonify({'error': 'Model output file not found!'}), 500
-
-            with current_app.app_context():
-                for key, val in model_output.items():
-                    print(f'Processing {key}...')
-                    scalarized = pd.DataFrame(scalarize(val))
-                    print(f"Length of scalarized data: {len(scalarized)}")
-                    for ix, row in scalarized.iterrows():
-                        one_row = {col: row[col] for col in scalarized.columns}
-                        tbl_row = tbl_utilities[key](**one_row)
-                        db.session.add(tbl_row)
-                print("Finished processing data")
-                try:
-                    db.session.commit()
-                    print('Committed to database')
-                    test_result = db.session.query(tbl_utilities["tbl_model_runs"]).all()
-                    print(f"Rows in database for tbl_model_runs: {len(test_result)}")
-                    for row in test_result:
-                        print(row)
-                except Exception as e:
-                    db.session.rollback()  # Rollback in case of error
-                    print(f"Error during commit: {e}")
-                finally:
-                    db.session.close()
-
-            return jsonify({'status': 'success', 'output': result.stdout})
+        if status == "paused":
+            db.session.execute(text('UPDATE status SET state = "running"'))
+            db.session.commit()
+            current_state = "utils/pickles/checkpoint.pkl"
+            current_count = "utils/pickles/checkpoint_counters.pkl"
+            command = [
+                venv_python,
+                os.path.join(project_root, 'models', 'xrai_runfile.py'),
+                environ_params, model_params, map_params, [current_state, current_count]
+            ]
         else:
-            return jsonify({'status': 'error', 'message': result.stderr}), 500
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+            command = [
+                venv_python,
+                os.path.join(project_root, 'models', 'xrai_runfile.py'),
+                environ_params, model_params, map_params
+            ]
+
+        try:
+            print("Running Model...")
+            model_status = {"status": "running"}
+            with open("utils/pickles/model_status.pkl", "wb") as f:
+                pickle.dump(model_status, f)
+            result = subprocess.run(command, capture_output=True, text=True)
+            print("RESULT! " + str(result.returncode))
+            print(f"stdout: {result.stdout}")
+            print(f"stderr: {result.stderr}")
+
+            if result.returncode == 0:
+                if os.path.exists('utils/pickles/model_output.pkl'):
+                    with open('utils/pickles/model_output.pkl', 'rb') as f:
+                        model_output = pickle.load(f)
+                else:
+                    print("model_output.pkl not found!")
+                    return jsonify({'error': 'Model output file not found!'}), 500
+
+                with current_app.app_context():
+                    for key, val in model_output.items():
+                        print(f'Processing {key}...')
+                        scalarized = pd.DataFrame(scalarize(val))
+                        print(f"Length of scalarized data: {len(scalarized)}")
+                        for ix, row in scalarized.iterrows():
+                            one_row = {col: row[col] for col in scalarized.columns}
+                            tbl_row = tbl_utilities[key](**one_row)
+                            db.session.add(tbl_row)
+                    print("Finished processing data")
+                    try:
+                        db.session.commit()
+                        print('Committed to database')
+                        test_result = db.session.query(tbl_utilities["tbl_model_runs"]).all()
+                        print(f"Rows in database for tbl_model_runs: {len(test_result)}")
+                        for row in test_result:
+                            print(row)
+                    except Exception as e:
+                        db.session.rollback()  # Rollback in case of error
+                        print(f"Error during commit: {e}")
+                    finally:
+                        db.session.close()
+
+                return jsonify({'status': 'success', 'output': result.stdout})
+            else:
+                return jsonify({'status': 'error', 'message': result.stderr}), 500
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+    # Call the model-running function
+    run_model()
 
 
 @main.route('/model/pause', methods=['POST'])
@@ -363,19 +367,6 @@ def get_current_episode():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
-
-
-@main.route('/database/last_run/tbl_model_runs', methods=['GET'])
-def get_last_run_model_run():
-    try:
-        last_run = db.session.query(tbl_model_runs).order_by(tbl_model_runs.id.desc()).first()
-        if last_run:
-            return jsonify(last_run), 200
-        else:
-            return jsonify({'message': 'No model run data found for the last run.'}), 204
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 
 @main.route('/database/last_run/tbl_local_state', methods=['GET'])

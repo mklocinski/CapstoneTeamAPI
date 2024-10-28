@@ -4,6 +4,10 @@ from flask_migrate import Migrate
 from .data_models import db  # Now importing db from data_models directly
 from .config import DevelopmentConfig, ProductionConfig  # Import both configs
 import os
+from dotenv import load_dotenv
+
+
+load_dotenv()  # Loads environment variables from .env
 
 def create_app():
     app = Flask(__name__)
@@ -14,13 +18,13 @@ def create_app():
     else:
         app.config.from_object(ProductionConfig)
 
+    print("SQLAlchemy URI in app config:", app.config.get('SQLALCHEMY_DATABASE_URI'))
+
     db.init_app(app)  # Initialize db here
     migrate = Migrate(app, db)
 
     import pandas as pd
     import numpy as np
-    print(f"Startup Check - Pandas version: {pd.__version__}")
-    print(f"Startup Check - Numpy version: {np.__version__}")
 
     # Import routes and register Blueprints
     from .routes import main
