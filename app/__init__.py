@@ -1,32 +1,29 @@
+import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from .data_models import db  # Now importing db from data_models directly
-from .config import DevelopmentConfig, ProductionConfig  # Import both configs
-import os
 from dotenv import load_dotenv
+from .data_models import db  # Now importing db from data_models directly
+from .config import get_config  # Import the config loader
 
-
-load_dotenv()  # Loads environment variables from .env
+load_dotenv()  # Load environment variables from .env
+print("Environment variable check: SQLALCHEMY_DATABASE_URI =", os.getenv("SQLALCHEMY_DATABASE_URI"))
 
 def create_app():
     app = Flask(__name__)
 
-    # Check the environment and apply the corresponding configuration
-    if os.getenv("FLASK_ENV") == "development":
-        app.config.from_object(DevelopmentConfig)
-    else:
-        app.config.from_object(ProductionConfig)
+    # Apply the corresponding configuration based on the environment
+    config = get_config()
+    app.config.from_object(config)
 
-    print("SQLAlchemy URI in app config:", app.config.get('SQLALCHEMY_DATABASE_URI'))
+    # Debugging print to verify configuration
+    print("SQLAlchemy URI in app config:", app.config.get("SQLALCHEMY_DATABASE_URI"))
 
-    db.init_app(app)  # Initialize db here
+    # Initialize extensions
+    db.init_app(app)
     migrate = Migrate(app, db)
 
-    import pandas as pd
-    import numpy as np
-
-    # Import routes and register Blueprints
+    # Register Blueprints
     from .routes import main
     app.register_blueprint(main)
 

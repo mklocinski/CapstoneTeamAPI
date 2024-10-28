@@ -8,8 +8,8 @@ class Config:
 
 class ProductionConfig(Config):
     """Production configuration used on Heroku."""
-    # Use DATABASE_URL for Heroku production, automatically set by Heroku
-    uri = os.getenv("DATABASE_URL")
+    # Attempt to get SQLALCHEMY_DATABASE_URI; fall back to DATABASE_URL if necessary
+    uri = os.getenv("SQLALCHEMY_DATABASE_URI") or os.getenv("DATABASE_URL")
 
     # Convert to SQLAlchemy-compatible URI if necessary
     if uri and uri.startswith("postgres://"):
