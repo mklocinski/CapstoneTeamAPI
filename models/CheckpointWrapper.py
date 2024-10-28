@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from deep_rl_for_swarms.common.act_wrapper import ActWrapper
 import pickle
 from sqlalchemy import text
-from app import db
+from app.data_models import db
 
 
 # -------------------------------------------------------------------------- #

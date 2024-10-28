@@ -99,7 +99,7 @@ def TrainWrapper(
                                       map_file=os.path.join(log_dir, 'map.json'))
         print("Start training....")
 
-        if current_state is None:
+        if current_state[0] is None:
             learn_with_checkpoints(output_logger, policy_fn,
                        max_timesteps=10,
                        act_wrapper=None,

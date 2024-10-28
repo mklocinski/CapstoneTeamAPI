@@ -1,15 +1,16 @@
 import os
 
 class Config:
-    # Get the DATABASE_URL from the environment
-    uri = os.getenv("DATABASE_URL")  # Heroku provides this environment variable
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # Replace the deprecated 'postgres://' with 'postgresql+psycopg2://'
+class ProductionConfig(Config):
+    # Use DATABASE_URL for Heroku production, which is automatically set by Heroku
+    uri = os.getenv("DATABASE_URL")
     if uri and uri.startswith("postgres://"):
         uri = uri.replace("postgres://", "postgresql+psycopg2://", 1)
-
-    # Set SQLAlchemy database URI
     SQLALCHEMY_DATABASE_URI = uri
 
-    # Other configurations
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
+class DevelopmentConfig(Config):
+    # Local development database configuration (SQLite)
+    SQLALCHEMY_DATABASE_URI = "sqlite:///local.db"
+    DEBUG = True

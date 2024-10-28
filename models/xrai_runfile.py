@@ -53,7 +53,7 @@ if __name__ == '__main__':
         if len(sys.argv) == 5:
             current_state = sys.argv[4]
         else:
-            current_state = None
+            current_state = [None, None]
 
         # Parse inputs as JSON
         environment_inputs = json.loads(environment_inputs)
