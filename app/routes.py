@@ -216,41 +216,42 @@ def post_standard_run_xrai_system():
     model_params = json.dumps(data.get("model_parameters"))
     map_params = json.dumps(data.get("map_parameters"))
 
-    @copy_current_request_context
+    # @copy_current_request_context
     def run_model():
-        # Determine project root and set the virtual environment's Python executable
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        venv_python = "/app/model_venv/bin/python3.7"
-        model_script_path = os.path.join(project_root, 'models', 'xrai_runfile.py')
+        with current_app.app_context():
+            # Determine project root and set the virtual environment's Python executable
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            venv_python = "/app/model_venv/bin/python3.7"
+            model_script_path = os.path.join(project_root, 'models', 'xrai_runfile.py')
 
-        run_model = [
-            venv_python,
-            model_script_path,
-            environ_params, model_params, map_params
-        ]
+            run_model = [
+                venv_python,
+                model_script_path,
+                environ_params, model_params, map_params
+            ]
 
-        # Run the subprocess and capture output
-        result = subprocess.run(run_model, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"Model execution failed: {result.stderr}")
-            return None  # Handle error if needed
+            # Run the subprocess and capture output
+            result = subprocess.run(run_model, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Model execution failed: {result.stderr}")
+                return None  # Handle error if needed
 
-        # Access the model output
-        model_output_path = os.path.join(project_root, 'utils', 'pickles', 'model_output.pkl')
-        if os.path.exists(model_output_path):
-            with open(model_output_path, 'rb') as f:
-                model_output = pickle.load(f)
+            # Access the model output
+            model_output_path = os.path.join(project_root, 'utils', 'pickles', 'model_output.pkl')
+            if os.path.exists(model_output_path):
+                with open(model_output_path, 'rb') as f:
+                    model_output = pickle.load(f)
 
-            # Database interactions within the same context
-            for key, val in model_output.items():
-                scalarized = pd.DataFrame(scalarize(val))
-                for ix, row in scalarized.iterrows():
-                    one_row = {col: row[col] for col in scalarized.columns}
-                    if key in tbl_utilities:
-                        tbl_row = tbl_utilities[key](**one_row)
-                        db.session.add(tbl_row)
-            db.session.commit()
-            print("Model output committed to the database successfully.")
+                # Database interactions within the same context
+                for key, val in model_output.items():
+                    scalarized = pd.DataFrame(scalarize(val))
+                    for ix, row in scalarized.iterrows():
+                        one_row = {col: row[col] for col in scalarized.columns}
+                        if key in tbl_utilities:
+                            tbl_row = tbl_utilities[key](**one_row)
+                            db.session.add(tbl_row)
+                db.session.commit()
+                print("Model output committed to the database successfully.")
 
     # Call the model-running function
     run_model()
