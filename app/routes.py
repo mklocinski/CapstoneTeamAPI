@@ -1,5 +1,5 @@
 from flask import Blueprint, current_app, jsonify, request, copy_current_request_context
-from models.ModelOutputWrapper import scalarize
+from utils.database_utils import scalarize
 from utils.database_utils import tbl_utilities
 import subprocess
 import os
@@ -11,6 +11,10 @@ import warnings
 import multiprocessing
 from .data_models import tbl_model_runs, tbl_local_state, tbl_rewards, tbl_global_state, tbl_drone_actions, tbl_model_run_params, tbl_map_data
 from . import db
+import tempfile
+import datetime
+import platform
+import sys
 
 main = Blueprint('main', __name__)
 warnings.filterwarnings("ignore")
@@ -31,6 +35,9 @@ def init_db():
                 db.session.execute(text("INSERT INTO status (state, episode) VALUES ('running', 0)"))
                 db.session.commit()
 
+@main.route('/')
+def home():
+    return jsonify({"message": "Welcome to the XRAI API. Please refer to the documentation for available endpoints."}), 200
 
 def check_for_data_batches():
     batch_number = 0
@@ -72,162 +79,48 @@ def start_batch_processing():
     process.start()
     return "Batch processing started"
 
-#
-# @main.route('/model/standard/run_xrai', methods=['GET', 'POST'])
-# def post_model_run():
-#     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-#     venv_python = "/app/model_venv/bin/python"
-#
-#     run_model = [
-#         venv_python,
-#         os.path.join(project_root, 'models', 'WrappedModel.py')
-#     ]
-#
-#     result = subprocess.run(run_model, capture_output=True, text=True)
-#     print("RESULT! " + str(result.returncode))
-#     print(f"stdout: {result.stdout}")
-#     print(f"stderr: {result.stderr}")
-#
-#     if result.returncode == 0:
-#         if os.path.exists('utils/pickles/model_output.pkl'):
-#             with open('utils/pickles/model_output.pkl', 'rb') as f:
-#                 model_output = pickle.load(f)
-#         else:
-#             print("model_output.pkl not found!")
-#             return jsonify({'error': 'Model output file not found!'}), 500
-#
-#         with current_app.app_context():
-#             for key, val in model_output.items():
-#                 print(f'Processing {key}...')
-#                 scalarized = pd.DataFrame(scalarize(val))
-#                 print(f"Length of scalarized data: {len(scalarized)}")
-#                 for ix, row in scalarized.iterrows():
-#                     one_row = {col: row[col] for col in scalarized.columns}
-#                     tbl_row = tbl_utilities[key](**one_row)
-#                     db.session.add(tbl_row)
-#
-#             try:
-#                 db.session.commit()
-#                 print('Committed to database')
-#
-#                 # Query the database before closing the session
-#                 result = db.session.query(tbl_utilities["tbl_model_runs"]).all()
-#                 print(f"Rows in database for tbl_model_runs: {len(result)}")
-#                 for row in result:
-#                     print(row)
-#             except Exception as e:
-#                 db.session.rollback()  # Rollback in case of error
-#                 print(f"Error during commit: {e}")
-#             finally:
-#                 db.session.close()
-#
-#         return jsonify({'model_output': "Model ran successfully; output committed to database"})
-#
-#     else:
-#         return jsonify({'error': result.stderr}), 500
-#
-#
-# @main.route('/model/standard/run_xrai', methods=['GET', 'POST'])
-# def post_standard_run_xrai_system():
-#     data = request.get_json()
-#     environ_params = json.dumps(data.get("environment_parameters"))
-#     model_params = json.dumps(data.get("model_parameters"))
-#     rai_params = json.dumps(data.get("rai_parameters"))
-#     map_params = json.dumps(data.get("map_parameters"))
-#
-#     # Determine project root and set the virtual environment's Python executable
-#     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-#     venv_python = "/app/model_venv/bin/python3.7"
-#
-#     # Path to WrappedModel.py
-#     model_script_path = os.path.join(project_root, 'models', 'xrai_runfile.py')
-#     run_model = [
-#             venv_python,
-#             model_script_path,
-#             environ_params, model_params, map_params
-#         ]
-#
-#     # Run the subprocess and capture output
-#     result = subprocess.run(run_model, capture_output=True, text=True)
-#     print(f"Subprocess return code: {result.returncode}")
-#     print(f"Subprocess stdout: {result.stdout}")
-#     print(f"Subprocess stderr: {result.stderr}")
-#
-#     if result.returncode == 0:
-#         # Use absolute path for model output in Heroku
-#         model_output_path = os.path.join(project_root, 'utils', 'pickles', 'model_output.pkl')
-#
-#         # Ensure the model output file exists before proceeding
-#         if os.path.exists(model_output_path):
-#             with open(model_output_path, 'rb') as f:
-#                 model_output = pickle.load(f)
-#         else:
-#             print("model_output.pkl not found!")
-#             return jsonify({'error': 'Model output file not found!'}), 500
-#
-#         # Set up application context for database access on Heroku
-#         with current_app.app_context():
-#             for key, val in model_output.items():
-#                 print(f'Processing {key}...')
-#
-#                 # Convert scalarized output to a DataFrame
-#                 scalarized = pd.DataFrame(scalarize(val))
-#                 print(f"Length of scalarized data: {len(scalarized)}")
-#
-#                 # Populate the database from scalarized data
-#                 for ix, row in scalarized.iterrows():
-#                     one_row = {col: row[col] for col in scalarized.columns}
-#                     if key in tbl_utilities:
-#                         tbl_row = tbl_utilities[key](**one_row)
-#                         db.session.add(tbl_row)
-#                     else:
-#                         print(f"Warning: {key} not found in tbl_utilities.")
-#
-#             # Attempt to commit data to the database
-#             try:
-#                 db.session.commit()
-#                 print('Data committed to the database successfully.')
-#
-#                 # Optional verification: query database for `tbl_model_runs` data
-#                 result = db.session.query(tbl_utilities["tbl_model_runs"]).all()
-#                 print(f"Rows in database for tbl_model_runs: {len(result)}")
-#                 for row in result:
-#                     print(row)
-#             except Exception as e:
-#                 db.session.rollback()
-#                 print(f"Error during database commit: {e}")
-#                 return jsonify({'error': f'Database error: {str(e)}'}), 500
-#             finally:
-#                 db.session.close()
-#
-#         return jsonify({'model_output': "Model ran successfully; output committed to database"}), 200
-#
-#     else:
-#         # Return detailed error information from subprocess
-#         print("Model execution failed. Subprocess stderr:", result.stderr)
-#         return jsonify({'error': f'Model execution failed: {result.stderr}'}), 500
-#
-
 
 @main.route('/model/standard/run_xrai', methods=['POST'])
 def post_standard_run_xrai_system():
+    print("start run")
     data = request.get_json()
     environ_params = json.dumps(data.get("environment_parameters"))
     model_params = json.dumps(data.get("model_parameters"))
     map_params = json.dumps(data.get("map_parameters"))
+    rai_params = json.dumps(data.get("rai_parameters"))
 
-    # @copy_current_request_context
+    import models.MapPackage as m
+    map = m.EnvironmentMap()
+    map.generate_obstacle_data()
+    map_data = map.dataframe.reset_index(drop=True).to_json()
+
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json') as temp_file:
+        temp_file.write(map_data)
+        temp_file_path = temp_file.name
+
+    run_id = round(1000 * datetime.datetime.now().timestamp(), 0)
+    db.session.execute(text('UPDATE status SET run_id = :run_id'), {'run_id': run_id})
+    db.session.execute(text("UPDATE status SET state = 'running'"))
+    db.session.commit()
+
     def run_model():
         with current_app.app_context():
             # Determine project root and set the virtual environment's Python executable
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            venv_python = "/app/model_venv/bin/python3.7"
+            #venv_python = "/app/model_venv/bin/python3.7"
+            venv_python = sys.executable
+            # if platform.system() == "Windows":
+            #     venv_python = os.path.join(project_root, ".venv", "Scripts", "python.exe")
+            # else:
+            #     venv_python = "/app/model_venv/bin/python3.7"
+            print(platform.system())
+            print(venv_python)
             model_script_path = os.path.join(project_root, 'models', 'xrai_runfile.py')
 
             run_model = [
                 venv_python,
                 model_script_path,
-                environ_params, model_params, map_params
+                environ_params, model_params, temp_file_path, rai_params
             ]
 
             # Run the subprocess and capture output
@@ -235,6 +128,8 @@ def post_standard_run_xrai_system():
             if result.returncode != 0:
                 print(f"Model execution failed: {result.stderr}")
                 return None  # Handle error if needed
+
+            os.remove(temp_file_path)
 
             # Access the model output
             model_output_path = os.path.join(project_root, 'utils', 'pickles', 'model_output.pkl')
@@ -255,6 +150,13 @@ def post_standard_run_xrai_system():
 
     # Call the model-running function
     run_model()
+
+    db.session.execute(text('UPDATE status SET run_id = 0'))
+    db.session.execute(text("UPDATE status SET state = 'complete'"))
+    db.session.execute(text('UPDATE status SET episode = 0'))
+    db.session.execute(text('UPDATE status SET timesteps = 0'))
+    db.session.execute(text('UPDATE status SET iters = 0'))
+    db.session.commit()
 
     return jsonify({'message': 'Model run initiated; output will be stored upon completion.'}), 200
 
@@ -447,3 +349,27 @@ def get_last_run_map_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@main.route('/api/check_model_status', methods=['GET'])
+def api_check_model_status():
+    try:
+        status = db.session.execute(text('SELECT state FROM status')).scalar()
+        return jsonify({'status': status}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@main.route('/api/record_model_episode', methods=['POST'])
+def api_record_model_episode():
+    data = request.json
+    current_episode = data.get("current_episode")
+
+    if current_episode is None:
+        return jsonify({"error": "current_episode is required"}), 400
+
+    try:
+        update_query = text("UPDATE status SET current_episode = :current_episode")
+        db.session.execute(update_query, {"current_episode": current_episode})
+        db.session.commit()
+        return jsonify({"message": "Episode recorded successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

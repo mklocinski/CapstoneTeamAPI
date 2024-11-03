@@ -5,6 +5,21 @@ from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 
+class tbl_status(db.Model):
+    __tablename__ = 'status'
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Float, primary_key=False)
+    state = db.Column(db.String(255), nullable=False)  # e.g., 'running', 'paused'
+    episode = db.Column(db.Integer, nullable=False, default=0)  # Track episode number
+    timesteps =db.Column(db.Integer, nullable=False, default=0)
+    iters = db.Column(db.Integer, nullable=False, default=0)
+
+
+    def __repr__(self):
+        return f"<Status(state='{self.state}', episode={self.episode})>"
+
+
 class tbl_model_runs(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     cflt_run_id = db.Column(db.Float, primary_key=False)
@@ -75,9 +90,11 @@ class tbl_map_data(db.Model):
     cflt_run_id = db.Column(db.Float, primary_key=False)
     cflt_x_coord = db.Column(db.Float, unique=False)
     cflt_y_coord = db.Column(db.Float, unique=False)
-    cint_obstacle = db.Column(db.Integer, unique=False)
-    cstr_obstacle_type = db.Column(db.String, unique=False)
+    cstr_point_type = db.Column(db.String, unique=False)
+    cint_obstacle_id = db.Column(db.Integer, unique=False)
+    cstr_obstacle = db.Column(db.String, unique=False)
     cflt_obstacle_risk = db.Column(db.Float, unique=False)
+    cstr_obstacle_color = db.Column(db.String, unique=False)
 
 class tbl_rai(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)

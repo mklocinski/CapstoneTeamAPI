@@ -4,11 +4,35 @@ import gym
 import numpy as np
 import pandas as pd
 import pickle
+from flask import current_app
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import update
+from sqlalchemy import text
+#from utils.database_utils import record_model_episode
+from models.drlss.deep_rl_for_swarms.ma_envs.commons import utils as U
+import requests
+import os
+
+api_base_url = "https://xraiapi-ba66c372be3f.herokuapp.com/api"
+
+def check_model_status():
+    response = requests.get(f"{api_base_url}/check_model_status")
+    if response.status_code == 200:
+        return response.json().get("status")
+    else:
+        print("Error checking model status:", response.json().get("error"))
+        return None
+
+
+def record_model_episode(current_episode):
+    url = f"{api_base_url}/record_model_episode"
+    response = requests.post(url, json={"current_episode": current_episode})
+
+    if response.status_code == 200:
+        print("Episode recorded successfully.")
+    else:
+        print("Error recording episode:", response.json().get("error"))
 
 db = SQLAlchemy()
-
 # -------------------------------------------------------------------------- #
 # ---------------------------- Description --------------------------------- #
 # -------------------------------------------------------------------------- #
@@ -29,26 +53,44 @@ db = SQLAlchemy()
 #   > scalarize_[insert table](): scalarizes pickled tables for loading into
 #     database
 
-# -------------------------------------------------------------------------- #
+# ------------------------------------------------------------------------------- #
 # ------------- OutputWrapper(ModelObject): models output wrapper --------------- #
-# -------------------------------------------------------------------------- #
+# ------------------------------------------------------------------------------- #
+
+def nearest_obstacle_point(x,y, xy_array):
+    all_distances = np.sqrt((xy_array[:, 0] - x) ** 2 + (xy_array[:, 1] - y) ** 2)
+    min_distance = min(all_distances)
+    nearest = xy_array[np.argmin(all_distances)]
+    return min_distance
+
+
 class OutputWrapper(gym.Wrapper):
-    def __init__(self, env, env_type, environment_params, model_params, map_object,
-                 log_file="output.json", param_file="param.json", map_file="map.json"):
+    def __init__(self, env, env_type, environment_params, rai_params, model_params, map_object,
+                 log_file="output.json",
+                 param_file="param.json",
+                 rai_file="rai.json",
+                 map_file="map.json",
+                 run_type="standard"):
         super(OutputWrapper, self).__init__(env)
         self.run_date = datetime.datetime.now().strftime("%Y%m%d_%H%M_%S")
+        self.run_type = run_type
         self.env_type = env_type
         self.environment_params = environment_params
+        self.rai_params = rai_params
         self.model_params = model_params
         self.log_file = log_file
         self.param_file = param_file
+        self.rai_file = rai_file
         self.map_file = map_file
         self.episode_rewards = []
         self.episode = 0
         self.log_data = []
         self.param_data = []
-        map_data_df = map_object.map_all_coordinates_df.reset_index(drop=True)
-        self.map_data = map_data_df.to_json(orient='index')
+        self.rai_data = []
+        self.run_data = []
+        self.map_data = map_object
+        self.obstacle_df = None
+        self.run_type = run_type
 
     def run_parameters(self, **kwargs):
         env_entry = {de: val for de, val in self.environment_params.items()}
@@ -62,9 +104,112 @@ class OutputWrapper(gym.Wrapper):
         self.episode = 0
         return self.env.reset(**kwargs)
 
+    def get_collision_data(self):
+        obstacles = self.map_data["cstr_obstacle"].unique()
+
+        obstacle_lookup = {obs: self.map_data[self.map_data["cstr_obstacle"]==obs]["cint_obstacle_id"].unique() for obs in obstacles}
+        distance_data = []
+        for obstacle in obstacles:
+            obstacle_risk = self.map_data[self.map_data["cstr_obstacle"]==obstacle]["cint_obstacle_risk"].unique()
+            for id in obstacle_lookup[obstacle]:
+                df = self.map_data[(self.map_data["cstr_obstacle"] == obstacle) &
+                                   (self.map_data["cint_obstacle_id"] == id) &
+                                   (self.map_data["cstr_point_type"] == "boundary")]
+                boundary = np.array([(x, y) for x, y in zip(df["cflt_x_coord"], df["cflt_y_coord"])])
+                dists = [nearest_obstacle_point(drone[0], drone[1], boundary) for drone in self.world.nodes]
+                collisions = [1 if dist == 0 else 0 for dist in dists]
+                risks = [obstacle_risk if dist == 0 else 0 for dist in dists]
+                df = pd.DataFrame({
+                    "cint_drone_id":[i for i, el in enumerate(self.world.nodes)],
+                    "cstr_obstacle":[obstacle for drone in self.world.nodes],
+                    "cstr_obstacle_id": [id for drone in self.world.nodes],
+                    "cflt_distance_to_obstacle":dists,
+                    "cint_collisions":collisions,
+                    "cint_risk": risks
+                })
+                distance_data.append(df)
+        dfs = pd.concat(distance_data)
+        self.obstacle_df = dfs.groupby("cint_drone_id", as_index=False).agg(
+            {"cflt_distance_to_obstacle":"sum",
+             "cint_collisions":"sum",
+             "cint_risk":"sum"}
+        )
+    def get_rai_reward(self, actions):
+        self.get_collision_data()
+        all_distances = U.get_upper_triangle(self.world.distance_matrix, subtract_from_diagonal=-1)
+        all_distances_cap = np.where(all_distances > self.comm_radius, self.comm_radius, all_distances)
+        all_distances_cap_norm = all_distances_cap / self.comm_radius  # (self.world_size * np.sqrt(2) / 2)
+
+        dist_rew = np.mean(all_distances_cap_norm)
+        action_pen = 0.001 * np.mean(actions ** 2)
+
+        if self.rai_params["basic_collision_avoidance"]==True:
+            all_collisions = self.obstacle_df["cint_collisions"].to_numpy()
+            collision_pen = sum([100 * collision for collision in all_collisions])
+            all_obstacle_distances = self.obstacle_df["cflt_distance_to_obstacle"].to_numpy()
+            all_obstacles_cap = np.where(all_obstacle_distances > self.comm_radius, self.comm_radius,
+                                         all_obstacle_distances)
+            all_obstacles_cap_norm = all_obstacles_cap / self.comm_radius
+            r = - dist_rew - action_pen - collision_pen
+            r = np.ones((self.nr_agents,)) * r
+        else:
+            r = - dist_rew - action_pen
+            r = np.ones((self.nr_agents,)) * r
+
+        return r
+
+    def rai_reward_data(self, actions):
+        self.get_collision_data()
+        all_distances = U.get_upper_triangle(self.world.distance_matrix, subtract_from_diagonal=-1)
+        all_distances_cap = np.where(all_distances > self.comm_radius, self.comm_radius, all_distances)
+        all_distances_cap_norm = all_distances_cap / self.comm_radius  # (self.world_size * np.sqrt(2) / 2)
+
+        dist_rew = np.mean(all_distances_cap_norm)
+        action_pen = 0.001 * np.mean(actions ** 2)
+
+        r = - dist_rew - action_pen
+
+        if self.rai_params["basic_collision_avoidance"]==True:
+            all_collisions = self.obstacle_df["cint_collisions"].to_numpy()
+            collision_pen = sum([100 * collision for collision in all_collisions])
+            all_obstacle_distances = self.obstacle_df["cflt_distance_to_obstacle"].to_numpy()
+            all_obstacles_cap = np.where(all_obstacle_distances > self.comm_radius, self.comm_radius,
+                                         all_obstacle_distances)
+            all_obstacles_cap_norm = all_obstacles_cap / self.comm_radius
+            r_with_collisions = - dist_rew - action_pen - collision_pen
+        else:
+            r_with_collisions = None
+            all_collisions = None
+            all_obstacles_cap = None
+
+        rai_data = {
+            "cflt_distance_reward": dist_rew,
+            "cflt_action_penalty": action_pen,
+            "cflt_reward_with_collisions": r_with_collisions,
+            "cint_all_collisions": all_collisions,
+            "cflt_capped_obstacle_distance": all_obstacles_cap
+        }
+        return rai_data
+
     def step(self, action):
         state = self.env.state if hasattr(self.env, "state") else self.env.observation_space.sample()
         next_state, reward, done, info = self.env.step(action)
+
+        reward = self.get_rai_reward(action)
+        rai_reward = self.rai_reward_data(action)
+
+        if self.run_type == "live":
+            run_entry = {
+                    "cint_episode": self.episode,
+                    "cstr_run_status": check_model_status(),
+                    "cdtm_status_timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+        else:
+            run_entry = {
+                "cint_episode": self.episode,
+                "cstr_run_status": "running",
+                "cdtm_status_timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
 
         log_entry = {
             "cint_n_drones": self.env.nr_agents,
@@ -74,12 +219,20 @@ class OutputWrapper(gym.Wrapper):
             "cstr_global_state": state,
             "local_state": info["state"],
             "actions": info["actions"],
-            "cflt_reward": reward
+            "cflt_reward": reward,
+            "cflt_distance_reward": rai_reward["cflt_distance_reward"],
+            "cflt_action_penalty": rai_reward["cflt_action_penalty"],
+            "cint_drone_collisions": rai_reward["cint_all_collisions"],
+            "cflt_drone_obstacle_distance": rai_reward["cflt_capped_obstacle_distance"]
         }
 
         self.log_data.append(log_entry)
-        self.episode += 1
         self.episode_rewards.append(reward)
+        self.run_data.append(run_entry)
+        self.episode += 1
+        print(f'On episode: {self.episode}', flush=True)
+        if self.run_type == "live":
+            record_model_episode(self.episode)
 
         return next_state, reward, done, info
 
@@ -124,9 +277,10 @@ class OutputWrapper(gym.Wrapper):
 # -------------- OutputObject: converts output to DataFrames --------------- #
 # -------------------------------------------------------------------------- #
 class OutputObject:
-    def __init__(self, output, params, map, output_type="json"):
+    def __init__(self, output, params, run_data, map, output_type="json"):
         self.output = output
         self.params = params[0]
+        self.run_data = run_data
         self.map = map
         self.output_type = output_type
         self.tables = {}
@@ -167,6 +321,8 @@ class OutputObject:
             orientation = []
             linear_velocity = []
             angular_velocity = []
+            collisions = []
+            obstacle_distances = []
             for episode in range(len(self.output)):
                 for drone in range(self.output[0]["cint_n_drones"]):
                     episodes.append(episode)
@@ -176,7 +332,8 @@ class OutputObject:
                     orientation.append(self.output[episode]["local_state"][drone][2])
                     linear_velocity.append(self.output[episode]["local_state"][drone][3])
                     angular_velocity.append(self.output[episode]["local_state"][drone][4])
-
+                    collisions.append(self.output[episode]["cint_drone_collisions"][drone])
+                    obstacle_distances.append(self.output[episode]["cflt_drone_obstacle_distance"][drone])
             return pd.DataFrame({
                 "cint_episode_id": episodes,
                 "cint_drone_id": drones,
@@ -184,13 +341,16 @@ class OutputObject:
                 "cflt_y_coord": y_coords,
                 "cflt_orientation": orientation,
                 "cflt_linear_velocity": linear_velocity,
-                "cflt_angular_velocity": angular_velocity
+                "cflt_angular_velocity": angular_velocity,
+                "cint_drone_collisions":collisions,
+                "cflt_drone_obstacle_distance":obstacle_distances
+
             })
 
     def make_tbl_global_state(self):
         if len(self.output) > 0:
             episode_id = [i for i in range(len(self.output))]
-            state_encoding = ["test" for i in range(len(self.output))]
+            state_encoding = [";".join(self.output[i]["cstr_global_state"]) for i in range(len(self.output))]
             return pd.DataFrame({"cint_episode_id": episode_id, "cstr_state_encoding": state_encoding})
 
     def make_tbl_drone_actions(self):
@@ -217,21 +377,28 @@ class OutputObject:
         if len(self.output) > 0:
             episodes = [i for i in range(len(self.output))]
             rewards = [self.output[i]["cflt_reward"][0] for i in range(len(self.output))]
-            return pd.DataFrame({"cint_episode_id": episodes, "cflt_reward": rewards})
+            dist = [self.output[i]["cflt_distance_reward"] for i in range(len(self.output))]
+            action = [self.output[i]["cflt_action_penalty"] for i in range(len(self.output))]
+            return pd.DataFrame({"cint_episode_id": episodes,
+                                 "cflt_reward": rewards,
+                                 "cflt_distance_reward":dist,
+                                 "cflt_action_penalty":action})
 
     def make_tbl_map_data(self):
         if len(self.map) > 0:
-            x_coord = []
-            y_coord = []
-            obstacle = []
-            for key, item in json.loads(self.map).items():
-                x_coord.append(item["x_coord"])
-                y_coord.append(item["y_coord"])
-                obstacle.append(item["obstacle"])
-            return pd.DataFrame({"cflt_x_coord": x_coord, "cflt_y_coord": y_coord, "cint_obstacle": obstacle})
+           return self.map
+
+    def make_tbl_run_status(self):
+        if len(self.run_data) > 0:
+            episodes = [self.run_data[i]["episode"] for i in range(len(self.run_data))]
+            status = [self.run_data[i]["status"] for i in range(len(self.run_data))]
+            time = [self.run_data[i]["time"] for i in range(len(self.run_data))]
+            return pd.DataFrame({"cint_episode_id": episodes,
+                                 "cstr_run_status": status,
+                                 "cdtm_status_timestamp": time})
 
     def generate_tables(self):
-        run_id = round(100000 * datetime.datetime.now().timestamp(), 0)
+        run_id = db.session.execute(text('SELECT id FROM status')).scalar()
         self.tables = {
             "tbl_model_runs": self.make_tbl_model_runs(),
             "tbl_drone_actions": self.make_tbl_drone_actions(),
@@ -239,11 +406,13 @@ class OutputObject:
             "tbl_rewards": self.make_tbl_rewards(),
             "tbl_global_state": self.make_tbl_global_state(),
             "tbl_local_state": self.make_tbl_local_state(),
-            "tbl_map_data": self.make_tbl_map_data()
+            "tbl_map_data": self.make_tbl_map_data(),
+            "tbl_run_status": self.make_tbl_run_status()
         }
 
         for name, tbl in self.tables.items():
             tbl.insert(0, "cflt_run_id", run_id)
+
 
     def pickle_tables(self):
         with open("utils/pickles/model_output.pkl", "wb") as f:
@@ -255,20 +424,3 @@ class OutputObject:
 # -------------------------------------------------------------------------- #
 # ------------------------- Helper Functions ------------------------------- #
 # -------------------------------------------------------------------------- #
-
-def scalarize(pickled_table):
-    tbl = {}
-    for col in pickled_table.columns:
-        if col[:5] == 'cint_':
-            tbl[col] = [int(i) for i in pickled_table[col]]
-        elif col[:5] == 'cdtm_':
-            tbl[col] = [datetime.datetime.strptime(i, "%Y%m%d_%H%M_%S") for i in pickled_table[col]]
-        elif col[:5] == 'cflt_':
-            tbl[col] = [float(i) for i in pickled_table[col]]
-        elif col[:5] == 'cbln_':
-            tbl[col] = [bool(i) for i in pickled_table[col]]
-        elif col[:5] == 'cstr_':
-            tbl[col] = [str(i) for i in pickled_table[col]]
-        else:
-            tbl[col] = [str(i) for i in pickled_table[col]]
-    return tbl

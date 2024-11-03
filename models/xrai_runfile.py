@@ -1,18 +1,8 @@
-# import sys
-# import os
-#
-# import numpy as np
-#
-# project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-# sys.path.insert(0, project_root)
-# os.environ['PYTHONPATH'] = project_root
-
-
 import sys
 import os
 import numpy as np
 import json
-
+import pandas as pd
 # Removed manual project root manipulation, since Heroku usually installs everything correctly within a defined environment
 import WrappedModel as wm
 import TestingMapPackage as mp
@@ -22,14 +12,7 @@ import TestingMapPackage as mp
 # -------------------------------- Run System ---------------------------------#
 # -----------------------------------------------------------------------------#
 
-def main(environment_inputs, model_inputs, map_inputs, current_state):
-
-    print("Making map...")
-    # -------------------------------- Create Map ---------------------------------#
-    map = mp.MapMaker(map_size=[environment_inputs["world_size"], environment_inputs["world_size"]])
-    map.initialize_empty_map()
-    map.generate_random_circles(map_inputs["obstacle1"])
-    map.get_all_coordinates()
+def main(environment_inputs, model_inputs, map_inputs, rai_inputs, current_state):
 
     # ------------------------------------ Run ------------------------------------#
     environment_id = environment_inputs["environment_id"]
@@ -37,7 +20,7 @@ def main(environment_inputs, model_inputs, map_inputs, current_state):
     environment_inputs["comm_radius"] = 100 * np.sqrt(environment_inputs["comm_radius"])
 
     print("Running model...")
-    wm.main(environment_id, environment_inputs, model_inputs, map, current_state)
+    wm.main(environment_id, environment_inputs, model_inputs, map_inputs, rai_inputs, current_state)
 
 
 if __name__ == '__main__':
@@ -49,19 +32,21 @@ if __name__ == '__main__':
         environment_inputs = sys.argv[1]
         model_inputs = sys.argv[2]
         map_inputs = sys.argv[3]
+        rai_inputs = sys.argv[4]
 
         if len(sys.argv) == 5:
-            current_state = sys.argv[4]
+            current_state = sys.argv[5]
         else:
             current_state = [None, None]
 
         # Parse inputs as JSON
         environment_inputs = json.loads(environment_inputs)
         model_inputs = json.loads(model_inputs)
-        map_inputs = json.loads(map_inputs)
+        map_inputs = pd.read_json(map_inputs)
+        rai_inputs = json.loads(rai_inputs)
 
         # Call main function
-        main(environment_inputs, model_inputs, map_inputs, current_state)
+        main(environment_inputs, model_inputs, map_inputs, rai_inputs, current_state)
     else:
         # Handle cases where the script is run without command-line arguments
         print("Error: Not enough arguments provided.")

@@ -55,6 +55,7 @@ def TrainWrapper(
                  environment_params,
                  model_params,
                  map_object,
+                 rai_params,
                  current_state):
 
         print("Session variables...")
@@ -88,18 +89,21 @@ def TrainWrapper(
         else:
             env = rendezvous.RendezvousEnv(**environment_params)
 
-        print("Implement output wrapper...")
-        output_logger = OutputWrapper(env,
-                                      env_type=environment,
-                                      environment_params=environment_params,
-                                      model_params=model_params,
-                                      map_object=map_object,
-                                      log_file=os.path.join(log_dir, 'output.json'),
-                                      param_file=os.path.join(log_dir, 'param.json'),
-                                      map_file=os.path.join(log_dir, 'map.json'))
+
         print("Start training....")
 
         if current_state[0] is None:
+            print("Implement output wrapper...")
+            output_logger = OutputWrapper(env,
+                                          env_type=environment,
+                                          environment_params=environment_params,
+                                          model_params=model_params,
+                                          map_object=map_object,
+                                          rai_params=rai_params,
+                                          log_file=os.path.join(log_dir, 'output.json'),
+                                          param_file=os.path.join(log_dir, 'param.json'),
+                                          map_file=os.path.join(log_dir, 'map.json'),
+                                          run_type="standard")
             learn_with_checkpoints(output_logger, policy_fn,
                        max_timesteps=10,
                        act_wrapper=None,
@@ -108,6 +112,16 @@ def TrainWrapper(
                         iters_so_far=0,
                        **model_params)
         else:
+            print("Implement output wrapper...")
+            output_logger = OutputWrapper(env,
+                                          env_type=environment,
+                                          environment_params=environment_params,
+                                          model_params=model_params,
+                                          map_object=map_object,
+                                          log_file=os.path.join(log_dir, 'output.json'),
+                                          param_file=os.path.join(log_dir, 'param.json'),
+                                          map_file=os.path.join(log_dir, 'map.json'),
+                                          run_type="live")
             act_wrapper, episodes_so_far, timesteps_so_far, iters_so_far = load_training_state(current_state, policy_fn)
             learn_with_checkpoints(output_logger, policy_fn,
                            max_timesteps=10,

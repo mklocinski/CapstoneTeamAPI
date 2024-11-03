@@ -1,8 +1,8 @@
-"""Initial migration
+"""initial migration
 
-Revision ID: 6225b2c4be9f
+Revision ID: 961c822e24e8
 Revises: 
-Create Date: 2024-10-28 18:09:34.539339
+Create Date: 2024-11-03 15:12:51.951718
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '6225b2c4be9f'
+revision = '961c822e24e8'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -51,9 +51,11 @@ def upgrade():
     sa.Column('cflt_run_id', sa.Float(), nullable=True),
     sa.Column('cflt_x_coord', sa.Float(), nullable=True),
     sa.Column('cflt_y_coord', sa.Float(), nullable=True),
-    sa.Column('cint_obstacle', sa.Integer(), nullable=True),
-    sa.Column('cstr_obstacle_type', sa.String(), nullable=True),
+    sa.Column('cstr_point_type', sa.String(), nullable=True),
+    sa.Column('cint_obstacle_id', sa.Integer(), nullable=True),
+    sa.Column('cstr_obstacle', sa.String(), nullable=True),
     sa.Column('cflt_obstacle_risk', sa.Float(), nullable=True),
+    sa.Column('cstr_obstacle_color', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('tbl_model_run_params',
