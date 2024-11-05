@@ -59,6 +59,8 @@ class tbl_local_state(db.Model):
     cflt_orientation = db.Column(db.Float, unique=False, nullable=False)
     cflt_linear_velocity = db.Column(db.Float, unique=False, nullable=False)
     cflt_angular_velocity = db.Column(db.Float, unique=False, nullable=False)
+    cint_drone_collisions = db.Column(db.Integer, primary_key=False)
+    cflt_drone_obstacle_distance = db.Column(db.Integer, primary_key=False)
 
 class tbl_global_state(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
