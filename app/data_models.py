@@ -80,10 +80,9 @@ class tbl_rewards(db.Model):
     cflt_run_id = db.Column(db.Float, primary_key=False)
     cint_episode_id = db.Column(db.Integer, primary_key=False)
     cflt_reward = db.Column(db.Float, unique=False, nullable=False)
-    cflt_pre_rai_reward = db.Column(db.Float, unique=False)
-    cflt_rai_penalty = db.Column(db.Float, unique=False)
-    cflt_rai_distance = db.Column(db.Float, unique=False)
-    cflt_rai_incurred_risk = db.Column(db.Float, unique=False)
+    cflt_distance_reward = db.Column(db.Float, unique=False)
+    cflt_action_penalty = db.Column(db.Float, unique=False)
+
 
 class tbl_map_data(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)

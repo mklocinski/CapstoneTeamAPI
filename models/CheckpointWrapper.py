@@ -1,3 +1,5 @@
+import json
+
 from deep_rl_for_swarms.common import explained_variance, zipsame, dataset
 from deep_rl_for_swarms.common import logger
 import deep_rl_for_swarms.common.tf_util as U
@@ -11,23 +13,37 @@ from deep_rl_for_swarms.common.cg import cg
 from contextlib import contextmanager
 from deep_rl_for_swarms.common.act_wrapper import ActWrapper
 import pickle
-from sqlalchemy import text
-from app.data_models import db
+import requests
 
 
 # -------------------------------------------------------------------------- #
 # ------------------------ Checkpoint Helper Functions --------------------- #
 # -------------------------------------------------------------------------- #
+# def check_model_status():
+#     status = db.session.execute(text('SELECT state FROM status')).scalar()
+#     return status
+#
+#
+# def record_model_episode(current_episode):
+#     update_query = text('''UPDATE status SET episode = :current_episode WHERE state = 'running' ''')
+#     db.session.execute(update_query, {"current_episode": current_episode})
+#     db.session.commit()
+
 def check_model_status():
-    status = db.session.execute(text('SELECT state FROM status')).scalar()
-    return status
+    print("Checking model status...")
+    try:
+        response = requests.get("https://xraiapi-ba66c372be3f.herokuapp.com/api/check_model_status", timeout=10)
+        # https://xraiapi-ba66c372be3f.herokuapp.com
+        response = json.loads(response)
+        if 'status' in response.keys():
+            return response["status"]
+        else:
+            return "running"
+    except requests.Timeout:
+        return "running"
 
-
-def record_model_episode(current_episode):
-    update_query = text('''UPDATE status SET episode = :current_episode WHERE state = 'running' ''')
-    db.session.execute(update_query, {"current_episode": current_episode})
-    db.session.commit()
-
+def record_model_episode(data):
+    response = requests.post("https://xraiapi-ba66c372be3f.herokuapp.com/api/record_model_episode", json=data)
 
 def save_checkpoint(action_wrapper, episodes_so_far, timesteps_so_far, iters_so_far):
     print("Saving checkpoint...")
@@ -278,10 +294,10 @@ def learn_with_checkpoints(env, policy_fn, *,
         # -------------------------------------------------------------------------- #
         # Checks if model has been paused if True then model is saved and then break #
         # -------------------------------------------------------------------------- #
-        record_model_episode(episodes_so_far)
-        if check_model_status() == "paused":
-            save_checkpoint(act_wrapper, episodes_so_far, timesteps_so_far, iters_so_far)
-            break
+        #record_model_episode(episodes_so_far)
+        # if check_model_status() == "paused":
+        #      save_checkpoint(act_wrapper, episodes_so_far, timesteps_so_far, iters_so_far)
+        #      break
         if callback: callback(locals(), globals())
         if max_timesteps and timesteps_so_far >= max_timesteps:
             break

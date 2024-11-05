@@ -1,18 +1,22 @@
-import json
 import datetime
 import gym
 import numpy as np
 import pandas as pd
 import pickle
-from flask import current_app
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import text
-#from utils.database_utils import record_model_episode
 from models.drlss.deep_rl_for_swarms.ma_envs.commons import utils as U
 import requests
-import os
+import time
 
 api_base_url = "https://xraiapi-ba66c372be3f.herokuapp.com/api"
+
+def get_run_id():
+    response = requests.get("http://app:8000/api/get_run_id")
+    if response.status_code == 200:
+        return response.json().get("id")
+    else:
+        print("Error checking model status:", response.json().get("error"))
+        return None
 
 def check_model_status():
     response = requests.get(f"{api_base_url}/check_model_status")
@@ -65,7 +69,8 @@ def nearest_obstacle_point(x,y, xy_array):
 
 
 class OutputWrapper(gym.Wrapper):
-    def __init__(self, env, env_type, environment_params, rai_params, model_params, map_object,
+    def __init__(self, env, env_type, environment_params, model_params, map_object,
+                 rai_params=None,
                  log_file="output.json",
                  param_file="param.json",
                  rai_file="rai.json",
@@ -252,6 +257,7 @@ class OutputWrapper(gym.Wrapper):
         serializable_param_data = self.convert_ndarray(self.param_data)
         serializable_log_data = self.convert_ndarray(self.log_data)
 
+
         # # Writing to file is commented out
         # with open(self.param_file, "w") as f:
         #     json.dump(serializable_param_data, f, indent=4)
@@ -277,7 +283,7 @@ class OutputWrapper(gym.Wrapper):
 # -------------- OutputObject: converts output to DataFrames --------------- #
 # -------------------------------------------------------------------------- #
 class OutputObject:
-    def __init__(self, output, params, run_data, map, output_type="json"):
+    def __init__(self, output, params, map, run_data = None, output_type="json"):
         self.output = output
         self.params = params[0]
         self.run_data = run_data
@@ -285,13 +291,21 @@ class OutputObject:
         self.output_type = output_type
         self.tables = {}
 
+
     def make_tbl_model_runs(self):
+        start_time = time.time()
+
         if len(self.output) > 0:
             run_date = self.output[0]["cdtm_run_date"]
             terminal_episode = [self.output[i]["cbln_terminal"] for i in range(len(self.output))].index(True)
+            end_time = time.time()
+            query_duration = end_time - start_time
+            print(f"make_tbl_model_runs duration: {query_duration:.2f} seconds")
             return pd.DataFrame({"cdtm_run_date": [run_date], "cbln_terminal_episode": [terminal_episode]})
 
     def make_tbl_model_run_params(self):
+        start_time = time.time()
+
         if len(self.params) > 0:
             ps = {'cstr_environment_id': self.params['environment_id'],
                   'cint_nr_agents': self.params['nr_agents'],
@@ -310,9 +324,14 @@ class OutputObject:
                   'cflt_lam': self.params['lam'],
                   'cint_vf_iters': self.params['vf_iters'],
                   'cint_vf_stepsize': self.params['vf_stepsize']}
+            end_time = time.time()
+            query_duration = end_time - start_time
+            print(f"make_tbl_model_run_params duration: {query_duration:.2f} seconds")
             return pd.DataFrame(ps, index=[0])
 
     def make_tbl_local_state(self):
+        start_time = time.time()
+
         if len(self.output) > 0:
             episodes = []
             drones = []
@@ -334,6 +353,9 @@ class OutputObject:
                     angular_velocity.append(self.output[episode]["local_state"][drone][4])
                     collisions.append(self.output[episode]["cint_drone_collisions"][drone])
                     obstacle_distances.append(self.output[episode]["cflt_drone_obstacle_distance"][drone])
+            end_time = time.time()
+            query_duration = end_time - start_time
+            print(f"make_tbl_local_state duration: {query_duration:.2f} seconds")
             return pd.DataFrame({
                 "cint_episode_id": episodes,
                 "cint_drone_id": drones,
@@ -348,12 +370,19 @@ class OutputObject:
             })
 
     def make_tbl_global_state(self):
+        start_time = time.time()
+
         if len(self.output) > 0:
             episode_id = [i for i in range(len(self.output))]
             state_encoding = [";".join(self.output[i]["cstr_global_state"]) for i in range(len(self.output))]
-            return pd.DataFrame({"cint_episode_id": episode_id, "cstr_state_encoding": state_encoding})
+            end_time = time.time()
+            query_duration = end_time - start_time
+            print(f"make_tbl_global_state duration: {query_duration:.2f} seconds")
+            return pd.DataFrame({"cint_episode_id": episode_id, "cstr_state_encoding": str(state_encoding)})
 
     def make_tbl_drone_actions(self):
+        start_time = time.time()
+
         if len(self.output) > 0:
             episodes = []
             drones = []
@@ -365,7 +394,9 @@ class OutputObject:
                     drones.append(drone)
                     linear_velocity.append(self.output[episode]["actions"][drone][0])
                     angular_velocity.append(self.output[episode]["actions"][drone][1])
-
+            end_time = time.time()
+            query_duration = end_time - start_time
+            print(f"make_tbl_drone_actions duration: {query_duration:.2f} seconds")
             return pd.DataFrame({
                 "cint_episode_id": episodes,
                 "cint_drone_id": drones,
@@ -374,42 +405,57 @@ class OutputObject:
             })
 
     def make_tbl_rewards(self):
+        start_time = time.time()
+
         if len(self.output) > 0:
             episodes = [i for i in range(len(self.output))]
             rewards = [self.output[i]["cflt_reward"][0] for i in range(len(self.output))]
             dist = [self.output[i]["cflt_distance_reward"] for i in range(len(self.output))]
             action = [self.output[i]["cflt_action_penalty"] for i in range(len(self.output))]
+            end_time = time.time()
+            query_duration = end_time - start_time
+            print(f"make_tbl_rewards duration: {query_duration:.2f} seconds")
             return pd.DataFrame({"cint_episode_id": episodes,
                                  "cflt_reward": rewards,
                                  "cflt_distance_reward":dist,
                                  "cflt_action_penalty":action})
 
     def make_tbl_map_data(self):
+        start_time = time.time()
+
         if len(self.map) > 0:
-           return self.map
+            end_time = time.time()
+            query_duration = end_time - start_time
+            print(f"make_tbl_map_data duration: {query_duration:.2f} seconds")
+            return self.map
 
     def make_tbl_run_status(self):
+
         if len(self.run_data) > 0:
             episodes = [self.run_data[i]["episode"] for i in range(len(self.run_data))]
             status = [self.run_data[i]["status"] for i in range(len(self.run_data))]
             time = [self.run_data[i]["time"] for i in range(len(self.run_data))]
+            start_time = time.time()
+            end_time = time.time()
+            query_duration = end_time - start_time
+            print(f"make_tbl_run_status duration: %.2f seconds", query_duration)
             return pd.DataFrame({"cint_episode_id": episodes,
                                  "cstr_run_status": status,
                                  "cdtm_status_timestamp": time})
 
     def generate_tables(self):
-        run_id = db.session.execute(text('SELECT id FROM status')).scalar()
+
         self.tables = {
             "tbl_model_runs": self.make_tbl_model_runs(),
             "tbl_drone_actions": self.make_tbl_drone_actions(),
             "tbl_model_run_params": self.make_tbl_model_run_params(),
             "tbl_rewards": self.make_tbl_rewards(),
-            "tbl_global_state": self.make_tbl_global_state(),
+            #"tbl_global_state": self.make_tbl_global_state(),
             "tbl_local_state": self.make_tbl_local_state(),
-            "tbl_map_data": self.make_tbl_map_data(),
-            "tbl_run_status": self.make_tbl_run_status()
+            "tbl_map_data": self.make_tbl_map_data()
+            #"tbl_run_status": self.make_tbl_run_status()
         }
-
+        run_id = "999999"
         for name, tbl in self.tables.items():
             tbl.insert(0, "cflt_run_id", run_id)
 

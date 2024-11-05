@@ -1,0 +1,39 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile  # Specify your Dockerfile here
+    container_name: flask_app
+    working_dir: /CapstoneTeamAPI
+    ports:
+      - "8000:8000"  # Map container's port 8000 to host's port 8000
+    env_file:
+      - .env.local  # Use .env.local for development
+    volumes:
+      - .:/CapstoneTeamAPI
+      - /CapstoneTeamAPI/.venv_main
+      - /CapstoneTeamAPI/.venv_model
+    networks:
+      - app-network
+    depends_on:
+      - db  # Ensure the app waits for db to be ready
+
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: cs_user
+      POSTGRES_PASSWORD: capstone
+      POSTGRES_DB: xraiapi_localdb
+    ports:
+      - "5433:5432"  # Expose PostgreSQL on the host
+    volumes:
+      - pgdata:/var/lib/postgresql/data  # Persist data locally
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  pgdata:  # Define the volume used by the db service

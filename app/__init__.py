@@ -5,11 +5,14 @@ from flask_migrate import Migrate
 from dotenv import load_dotenv
 from .data_models import db  # Import db from data_models directly
 from .config import get_config  # Import the config loader
+import logging
+import warnings
 
-# Load environment variables from .env
+# Load environment variables from .env or .env.local
 load_dotenv()
-print("Environment:",  os.getenv("FLASK_ENV"))
+print("Environment:", os.getenv("FLASK_ENV"))
 print("Environment variable check: SQLALCHEMY_DATABASE_URI =", os.getenv("SQLALCHEMY_DATABASE_URI"))
+warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
 
 def create_app():
     app = Flask(__name__)
@@ -38,6 +41,17 @@ def create_app():
             from .routes import init_db
             init_db()  # Call the function to initialize the database
             print("Database initialized.")
+
+    # Configure logging
+    if app.logger.hasHandlers():
+        app.logger.handlers.clear()
+
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    app.logger.addHandler(handler)
+    app.logger.setLevel(logging.INFO)
+
+    app.logger.info("App started successfully with logging configured")
 
     return app
 

@@ -145,11 +145,12 @@ def TrainWrapper(
         print('output tables pickled')
 
 
-def main(input_environment, input_environment_params, input_model_params, map_object, current_state):
+def main(input_environment, input_environment_params, input_model_params, map_object, input_rai_params, current_state):
     TrainWrapper(environment=input_environment,
                  environment_params=input_environment_params,
                  model_params=input_model_params,
                  map_object=map_object,
+                 rai_params=input_rai_params,
                  current_state=current_state)
 
 

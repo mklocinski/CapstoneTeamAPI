@@ -1,0 +1,29 @@
+# Exclude version control directories
+.git/
+.gitignore
+
+# Exclude IDE/editor config files (e.g., PyCharm, VSCode)
+.idea/
+.vscode/
+
+# Exclude Python bytecode and cache directories
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+
+# Exclude environment files if not needed in the container
+.env
+
+# Exclude logs and other unnecessary files
+*.log
+logs/
+
+# Exclude local virtual environments
+venv/
+.venv/
+
+# Exclude test directories and files, unless you need them for the image
+tests/
+*.test
