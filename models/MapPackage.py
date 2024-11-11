@@ -1,6 +1,7 @@
 import random as r
 import pandas as pd
 import pygame
+import math
 
 # from pygame.draw.rect(self.screen, self.building_color, (x, y, 40, 40))
 def rectangle(map, color, rect):
@@ -14,18 +15,24 @@ def circle(map, color, pos, radius):
 def triangle(map, color, pos):
     return pygame.draw.polygon(map, color, pos)
 
-
+def triangle_points(point, length):
+    br = [point[0]+length, point[1]]
+    height = length**2 - (0.5*length)**2
+    t = [point[0]+(0.5*length), point[1]+height]
+    return point, br, t
 
 class EnvironmentMap:
      def __init__(self,
                   map_size=[100, 100],
-                  no_fly_zones=dict(count=5, random=True, positions=[], sizes=[], risk=1),
-                  humans=dict(count=5, random=True, positions=[], sizes=[], risk=1),
-                  buildings=dict(count=5, random=True, positions=[], sizes=[], risk=1),
-                  trees=dict(count=5, random=True, positions=[], sizes=[], risk=1),
-                  animals=dict(count=5, random=True, positions=[], sizes=[], risk=1)):
+                  min_distance = 5,
+                  no_fly_zones=dict(count=1, random=True, positions=[], sizes=[], risk=1),
+                  humans=dict(count=1, random=True, positions=[], sizes=[], risk=1),
+                  buildings=dict(count=1, random=True, positions=[], sizes=[], risk=1),
+                  trees=dict(count=1, random=True, positions=[], sizes=[], risk=1),
+                  animals=dict(count=1, random=True, positions=[], sizes=[], risk=1)):
 
          self.map_size = map_size
+         self.min_distance = min_distance
          self.map = pygame.Surface(self.map_size, pygame.SRCALPHA)
          self.colors = {'humans': (255, 165, 0),
                         'buildings': (128, 128, 128),
@@ -38,6 +45,12 @@ class EnvironmentMap:
                            'buildings': buildings,
                            'trees': trees,
                            'animals': animals}
+
+         self.scaler = {'no-fly': 1/5,
+                           'humans': 1/100,
+                           'buildings': 1/50,
+                           'trees': 1/20,
+                           'animals': 1/20}
 
          self.obstacle_func = {'no-fly': 'rectangle',
                                 'humans': 'circle',
@@ -58,7 +71,7 @@ class EnvironmentMap:
          boundary_df = pd.DataFrame({
              'cint_obstacle_id':[id for pos in boundary],
              'cstr_obstacle':[obstacle for pos in boundary],
-             'cint_obstacle_risk':[self.obstacles[obstacle]["risk"] for pos in boundary],
+             'cflt_obstacle_risk':[self.obstacles[obstacle]["risk"] for pos in boundary],
              'cstr_obstacle_color': [self.colors[obstacle] for pos in boundary],
              'cstr_point_type': ["boundary" for pos in boundary],
              'cflt_x_coord':[pos[0] for pos in boundary],
@@ -67,7 +80,7 @@ class EnvironmentMap:
          interior_df = pd.DataFrame({
              'cint_obstacle_id': [id for pos in interior],
              'cstr_obstacle': [obstacle for pos in interior],
-             'cint_obstacle_risk': [self.obstacles[obstacle]["risk"] for pos in interior],
+             'cflt_obstacle_risk': [self.obstacles[obstacle]["risk"] for pos in interior],
              'cstr_obstacle_color': [self.colors[obstacle] for pos in interior],
              'cstr_point_type': ["boundary" for pos in interior],
              'cflt_x_coord': [pos[0] for pos in interior],
@@ -79,17 +92,25 @@ class EnvironmentMap:
              self.dataframe = pd.concat([self.dataframe, interior_df, boundary_df])
          self.map.fill((0, 0, 0, 0))
 
+     def generate_random_position(self, existing_positions):
+         for i in range(100):  # Attempt up to 100 times
+             x = r.randint(0, self.map_size[0] - 1)
+             y = r.randint(0, self.map_size[1] - 1)
+             if all(math.hypot(x - ex, y - ey) >= self.min_distance for ex, ey in existing_positions):
+                 return (x, y)
+
      def obstacle_coords(self, obstacle, rg):
          self.map.fill((0, 0, 0, 0))
-
          if self.obstacle_func[obstacle] == 'circle':
-             self.obstacles[obstacle]["radius"] = [r.randint(0, 50) for i in rg]
+             self.obstacles[obstacle]["radius"] = [r.randint(0, 50)*self.scaler[obstacle] for i in rg]
              zipper = zip(self.obstacles[obstacle]["positions"], self.obstacles[obstacle]["radius"])
              for i, el in enumerate(zipper, start=1):
                  circle(self.map, self.colors[obstacle], el[0], el[1])
                  self.get_shape_data(i, obstacle)
 
          elif self.obstacle_func[obstacle] == 'rectangle':
+             l = r.randint(0, self.map_size[0]*self.scaler[obstacle])
+             w = r.randint(0, self.map_size[0]*self.scaler[obstacle])
              self.obstacles[obstacle]["wh"] = [(r.randint(0, 50), r.randint(0, 50)) for i in rg]
              zipper = zip(self.obstacles[obstacle]["positions"], self.obstacles[obstacle]["wh"])
              for i, el in enumerate(zipper, start=1):
@@ -97,18 +118,30 @@ class EnvironmentMap:
                  self.get_shape_data(i, obstacle)
 
          elif self.obstacle_func[obstacle] == 'triangle':
-             self.obstacles[obstacle]["tri"] = [[(r.randint(0, 50), r.randint(0, 50)) for j in range(3)] for i in rg]
+             l = r.randint(0, self.map_size[0] * self.scaler[obstacle])
+             self.obstacles[obstacle]["tri"] = [triangle_points(point, l) for point in self.obstacles[obstacle]["positions"]]
              for i, el in enumerate(self.obstacles[obstacle]["tri"], start=1):
                     triangle(self.map, self.colors[obstacle], el)
                     self.get_shape_data(i, obstacle)
 
      def generate_obstacle_data(self):
          for key, val in self.obstacles.items():
-             rg = range(self.obstacles[key]["count"])
-             if self.obstacles[key]["random"]:
-                 self.obstacles[key]["sizes"] = [r.randint(0, 50) for i in rg]
-                 self.obstacles[key]["positions"] = [(r.randint(0, 50), r.randint(0, 50)) for s in
-                                                     self.obstacles[key]["sizes"]]
-             self.obstacle_coords(key, rg)
+             print(key)
+             if all(k in val for k in ["count", "positions", "risk", "random"]):
+                 rg = range(val["count"])
+             else:
+                 print(f"Error: Missing obstacle attributes: {key}")
+                 continue
+             if val["count"] > 0:
+                 existing_positions = []
+                 if self.obstacles[key]["random"]:
+                     obs_pos = []
+                     for i in rg:
+                         pos = self.generate_random_position(existing_positions)
+                         if pos:
+                             obs_pos.append(pos)
+                             existing_positions.append(pos)
+                     self.obstacles[key]["positions"] = obs_pos
+                 self.obstacle_coords(key, rg)
 
 

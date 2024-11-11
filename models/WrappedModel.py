@@ -102,8 +102,7 @@ def TrainWrapper(
                                           rai_params=rai_params,
                                           log_file=os.path.join(log_dir, 'output.json'),
                                           param_file=os.path.join(log_dir, 'param.json'),
-                                          map_file=os.path.join(log_dir, 'map.json'),
-                                          run_type="standard")
+                                          map_file=os.path.join(log_dir, 'map.json'))
             learn_with_checkpoints(output_logger, policy_fn,
                        max_timesteps=10,
                        act_wrapper=None,
@@ -120,8 +119,7 @@ def TrainWrapper(
                                           map_object=map_object,
                                           log_file=os.path.join(log_dir, 'output.json'),
                                           param_file=os.path.join(log_dir, 'param.json'),
-                                          map_file=os.path.join(log_dir, 'map.json'),
-                                          run_type="live")
+                                          map_file=os.path.join(log_dir, 'map.json'))
             act_wrapper, episodes_so_far, timesteps_so_far, iters_so_far = load_training_state(current_state, policy_fn)
             learn_with_checkpoints(output_logger, policy_fn,
                            max_timesteps=10,
@@ -133,16 +131,6 @@ def TrainWrapper(
 
         output_logger.close()
         env.close()
-        print('environment closed')
-        all_output = OutputObject(output_logger.log_data,
-                                  output_logger.param_data,
-                                  output_logger.map_data)
-        print('output object created')
-        all_output.generate_tables()
-        print('output tables generated')
-        print(all_output.tables.keys())
-        all_output.pickle_tables()
-        print('output tables pickled')
 
 
 def main(input_environment, input_environment_params, input_model_params, map_object, input_rai_params, current_state):

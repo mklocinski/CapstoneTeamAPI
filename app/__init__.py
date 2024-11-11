@@ -1,4 +1,6 @@
 import os
+import platform
+from urllib.parse import urlparse
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -7,12 +9,20 @@ from .data_models import db  # Import db from data_models directly
 from .config import get_config  # Import the config loader
 import logging
 import warnings
+import threading
 
 # Load environment variables from .env or .env.local
 load_dotenv()
-print("Environment:", os.getenv("FLASK_ENV"))
-print("Environment variable check: SQLALCHEMY_DATABASE_URI =", os.getenv("SQLALCHEMY_DATABASE_URI"))
+if platform.system() == "Linux":
+    load_dotenv(".env")
+else:
+    load_dotenv(".env.local")
+
 warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
+warnings.filterwarnings("ignore", category=Warning, module="tensorflow")
+warnings.filterwarnings("ignore", category=UserWarning, module="gym")
+
+
 
 def create_app():
     app = Flask(__name__)
@@ -42,6 +52,7 @@ def create_app():
             init_db()  # Call the function to initialize the database
             print("Database initialized.")
 
+
     # Configure logging
     if app.logger.hasHandlers():
         app.logger.handlers.clear()
@@ -54,5 +65,8 @@ def create_app():
     app.logger.info("App started successfully with logging configured")
 
     return app
+
+
+
 
 app = create_app()

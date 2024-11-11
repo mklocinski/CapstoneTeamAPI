@@ -100,12 +100,14 @@ class tbl_map_data(db.Model):
 class tbl_rai(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     cflt_run_id = db.Column(db.Float, primary_key=False)
-    cbln_basic_collision_avoidance = db.Column(db.Boolean, unique=False)
-    cflt_basic_collision_avoidance_penalty = db.Column(db.Float, unique=False)
-    cbln_advanced_collision_avoidance = db.Column(db.Boolean, unique=False)
-    cflt_advanced_collision_buffer_distance = db.Column(db.Float, unique=False)
-    cflt_advanced_collision_avoidance_penalty = db.Column(db.Float, unique=False)
-    cbln_basic_damage_avoidance = db.Column(db.Boolean, unique=False)
+    cbln_avoid_collisions = db.Column(db.Boolean, unique=False)
+    cflt_collision_penalty = db.Column(db.Float, unique=False)
+    cbln_avoid_buffer_zones = db.Column(db.Boolean, unique=False)
+    cflt_buffer_zone_size = db.Column(db.Float, unique=False)
+    cflt_buffer_entry_penalty = db.Column(db.Float, unique=False)
+    cint_expected_completion_time = db.Column(db.Integer, unique=False)
+    cflt_swarm_damage_tolerance = db.Column(db.Float, unique=False)
+    cflt_drone_damage_tolerance = db.Column(db.Float, unique=False)
 
 # if __name__ == "__main__":
 #     with app.app_context():

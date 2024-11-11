@@ -1,4 +1,5 @@
 import os
+import platform
 
 class Config:
     """Base configuration with default settings shared across environments."""
@@ -28,6 +29,7 @@ class DevelopmentConfig(Config):
 
 def get_config():
     """Environment-specific configuration loader for convenience."""
+    curr_sys = platform.system()
     env = os.getenv("FLASK_ENV", "development").lower()
     print(f'FLASK_ENV in get_config(): {env}')
     if env == "production":

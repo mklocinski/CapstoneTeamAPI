@@ -32,7 +32,7 @@ import requests
 def check_model_status():
     print("Checking model status...")
     try:
-        response = requests.get("https://xraiapi-ba66c372be3f.herokuapp.com/api/check_model_status", timeout=10)
+        response = requests.get("http://app:8000/api/check_model_status", timeout=10)
         # https://xraiapi-ba66c372be3f.herokuapp.com
         response = json.loads(response)
         if 'status' in response.keys():
@@ -43,7 +43,7 @@ def check_model_status():
         return "running"
 
 def record_model_episode(data):
-    response = requests.post("https://xraiapi-ba66c372be3f.herokuapp.com/api/record_model_episode", json=data)
+    response = requests.post("http://app:8000/api/record_model_episode", json=data)
 
 def save_checkpoint(action_wrapper, episodes_so_far, timesteps_so_far, iters_so_far):
     print("Saving checkpoint...")
@@ -294,7 +294,6 @@ def learn_with_checkpoints(env, policy_fn, *,
         # -------------------------------------------------------------------------- #
         # Checks if model has been paused if True then model is saved and then break #
         # -------------------------------------------------------------------------- #
-        #record_model_episode(episodes_so_far)
         # if check_model_status() == "paused":
         #      save_checkpoint(act_wrapper, episodes_so_far, timesteps_so_far, iters_so_far)
         #      break
