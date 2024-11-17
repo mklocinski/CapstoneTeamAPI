@@ -7,7 +7,7 @@ import pandas as pd
 from sqlalchemy import text, func
 import json
 import warnings
-from .data_models import tbl_model_runs, tbl_local_state, tbl_rewards, tbl_global_state, tbl_drone_actions, tbl_model_run_params, tbl_map_data
+from .data_models import tbl_model_runs, tbl_local_state, tbl_rewards, tbl_global_state, tbl_drone_actions, tbl_model_run_params, tbl_map_data, tbl_rai
 from . import db
 import datetime
 import platform
@@ -39,41 +39,6 @@ model_output_path = "/CapstoneTeamAPI/utils/pickles/model_output.pkl"
 @main.route('/')
 def home():
     return jsonify({"message": "Welcome to the XRAI API. Please refer to the documentation for available endpoints."}), 200
-
-
-def line_insertion(run_id, model_output_path):
-    with open(model_output_path, 'rb') as f:
-        model_output = pickle.load(f)
-    for name, tbl in model_output.items():
-        tbl.insert(0, "cflt_run_id", run_id)
-    if os.path.exists(model_output_path):
-        try:
-            for key, val in model_output.items():
-                scalarized = pd.DataFrame(scalarize(val))
-                current_app.logger.info(">> Loading %s to database", key)
-                current_app.logger.info(scalarized.columns)
-                for ix, row in scalarized.iterrows():
-                    one_row = {col: row[col] for col in scalarized.columns}
-                    if key in tbl_utilities:
-                        tbl_row = tbl_utilities[key](**one_row)
-                        db.session.add(tbl_row)
-
-            # Commit data to database
-            db.session.commit()
-            current_app.logger.info("Model output committed to the database successfully.")
-            return True, "Model ran and data committed successfully."
-        except Exception as e:
-            db.session.rollback()
-            error_message = f"An error occurred during database commit: {e}"
-            traceback_info = traceback.format_exc()
-            current_app.logger.error(f"{error_message}\nTraceback:\n{traceback_info}")
-            return False, f"{error_message}\nTraceback:\n{traceback_info}"
-    else:
-        error_message = "Model output file not found."
-        current_app.logger.error(error_message)
-        return False, error_message
-
-
 
 def make_environment_map(map_size,no_fly_zones,humans,buildings,trees,animals,
                          no_fly_zones_damage,humans_damage,buildings_damage,trees_damage,animals_damage):
@@ -162,7 +127,7 @@ def batch_insertion(run_id):
                     db.session.bulk_save_objects(batch)
                     db.session.commit()
                     current_app.logger.info(f">> Batch committed to {key}")
-
+            db.session.close()
             current_app.logger.info("Model output committed to the database successfully.")
             with open(db_status_path, 'w') as file:
                 file.write("queuing")
@@ -232,6 +197,7 @@ def post_standard_run_xrai_system():
         start_model_thread(map_path, environ_params, model_params, rai_params, run_id=model_status["run_id"])
         return jsonify({'model': 'Successful run'}), 200
     except Exception as e:
+
         return jsonify({'model': str(e)}), 500
 
 
@@ -274,6 +240,7 @@ def run_model(temp_file_path, environ_params, model_params, rai_params, run_id):
         model_status["status"] = "completed" if proc.returncode == 0 else "error"
         return proc.returncode == 0
     except Exception as e:
+        db.session.rollback()
         model_status["status"] = "error"
         thread_logger.info(f"An error occurred: {str(e)}")
         completion_queue.put({"status": "error", "error": str(e), "run_id": run_id})
@@ -323,6 +290,33 @@ def get_current_status():
         episode = f.read().strip()
     return jsonify({'status': episode})
 
+
+@main.route('/database/last_run/tbl_model_runs', methods=['GET'])
+def get_last_run_model_run():
+    try:
+        last_run_id = db.session.query(func.max(tbl_model_runs.cflt_run_id)).scalar()
+        current_app.logger.info(f"Retrieved last_run_id: {last_run_id}")
+
+        if last_run_id:
+            last_model_run = db.session.query(tbl_model_runs).filter(tbl_model_runs.cflt_run_id == last_run_id).all()
+            current_app.logger.info(f"Retrieved local states count: {len(last_model_run)}")
+
+            # Serialize each row in local_states
+            serialized_run = [run.__dict__ for run in last_model_run]
+            # Remove the SQLAlchemy metadata key `_sa_instance_state`
+            for state in serialized_run:
+                state.pop('_sa_instance_state', None)
+
+            if serialized_run:
+                return jsonify(serialized_run), 200
+            else:
+                return jsonify({'message': 'No model run data found for the last run.'}), 204
+        else:
+            return jsonify({'message': 'No model run data found for the last run.'}), 204
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving last run local state: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @main.route('/database/last_run/tbl_local_state', methods=['GET'])
 def get_last_run_local_state():
     try:
@@ -362,6 +356,21 @@ def get_last_run_rewards():
             return jsonify(serialized_rewards), 200 if serialized_rewards else 204
         else:
             return jsonify({'message': 'No rewards data found for the last run.'}), 204
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main.route('/database/last_run/tbl_rai', methods=['GET'])
+def get_last_run_rai():
+    try:
+        last_run_id = db.session.query(func.max(tbl_model_runs.cflt_run_id)).scalar()
+        if last_run_id:
+            rewards = db.session.query(tbl_rai).filter(tbl_rewards.cflt_run_id == last_run_id).all()
+            serialized_rai_params = [reward.__dict__ for reward in rewards]
+            for reward in serialized_rai_params:
+                reward.pop('_sa_instance_state', None)
+            return jsonify(serialized_rai_params), 200 if serialized_rai_params else 204
+        else:
+            return jsonify({'message': 'No RAI data found for the last run.'}), 204
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

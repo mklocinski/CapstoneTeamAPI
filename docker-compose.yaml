@@ -1,5 +1,12 @@
 services:
   app:
+    image: xraiapi
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: gunicorn -b 0.0.0.0:8000 --workers 1 --worker-class=gevent --timeout 120 --log-level debug app:app
     build:
       context: .
       dockerfile: Dockerfile  # Specify your Dockerfile here
@@ -8,6 +15,7 @@ services:
     ports:
       - "8000:8000"  # Map container's port 8000 to host's port 8000
     env_file:
+      - .env
       - .env.local  # Use .env.local for development
     volumes:
       - .:/CapstoneTeamAPI
@@ -17,6 +25,7 @@ services:
       - app-network
     depends_on:
       - db  # Ensure the app waits for db to be ready
+    restart: always
 
   db:
     image: postgres:13
@@ -30,6 +39,7 @@ services:
       - pgdata:/var/lib/postgresql/data  # Persist data locally
     networks:
       - app-network
+    restart: always
 
 networks:
   app-network:

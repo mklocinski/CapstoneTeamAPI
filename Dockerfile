@@ -39,6 +39,7 @@ COPY . .
 # Create main app virtual environment with Python 3.10
 RUN python3.10 -m venv /CapstoneTeamAPI/.venv_main
 RUN /CapstoneTeamAPI/.venv_main/bin/pip install -r requirements.txt
+RUN /CapstoneTeamAPI/.venv_main/bin/pip install zope.interface==6.4.post2
 
 # Create model-specific virtual environment with Python 3.7
 RUN python3.7 -m venv /CapstoneTeamAPI/.venv_model

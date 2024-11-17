@@ -8,14 +8,15 @@ class Config:
     DEBUG = False
 
 class ProductionConfig(Config):
-    uri = os.getenv("SQLALCHEMY_DATABASE_URI") or os.getenv("DATABASE_URL")
+    uri = os.getenv("HEROKU_POSTGRESQL_CYAN_URL") or os.getenv("SQLALCHEMY_DATABASE_URI") or os.getenv("DATABASE_URL")
 
     # Convert to SQLAlchemy-compatible URI if necessary
     if uri and uri.startswith("postgres://"):
         uri = uri.replace("postgres://", "postgresql+psycopg2://", 1)
 
     SQLALCHEMY_DATABASE_URI = uri
-    DEBUG = False  # Ensure debugging is disabled for production
+    DEBUG = False
+
 
 class DevelopmentConfig(Config):
     uri = os.getenv("SQLALCHEMY_DATABASE_URI", "postgresql://myuser:mypassword@db:5432/mylocaldb")
