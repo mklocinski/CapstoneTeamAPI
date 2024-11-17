@@ -1,5 +1,6 @@
 import random as r
 import pandas as pd
+import numpy as np
 import pygame
 import math
 
@@ -68,6 +69,15 @@ class EnvironmentMap:
              for y in range(self.map_size[1]):
                  if mask.get_at((x, y)) and (x, y) not in boundary:
                      interior.append((x, y))
+         all_points = boundary + interior
+         all_x_coords = [point[0] for point in all_points]
+         all_y_coords = [point[1] for point in all_points]
+
+         if all_x_coords and all_y_coords:
+             midpoint_x = int(np.mean(all_x_coords))
+             midpoint_y = int(np.mean(all_y_coords))
+         else:
+             midpoint_x, midpoint_y = None, None  # Handle empty case
          boundary_df = pd.DataFrame({
              'cint_obstacle_id':[id for pos in boundary],
              'cstr_obstacle':[obstacle for pos in boundary],
@@ -86,10 +96,21 @@ class EnvironmentMap:
              'cflt_x_coord': [pos[0] for pos in interior],
              'cflt_y_coord': [pos[1] for pos in interior]
          })
+
+         midpoint_df = pd.DataFrame({
+             'cint_obstacle_id': [id],
+             'cstr_obstacle': [obstacle],
+             'cflt_obstacle_risk': [self.obstacles[obstacle]["risk"]],
+             'cstr_obstacle_color': [self.colors[obstacle]],
+             'cstr_point_type': ["midpoint"],
+             'cflt_x_coord': [midpoint_x],
+             'cflt_y_coord': [midpoint_y]
+         })
+
          if self.dataframe is None:
-             self.dataframe = pd.concat([interior_df, boundary_df])
+             self.dataframe = pd.concat([midpoint_df, interior_df, boundary_df])
          else:
-             self.dataframe = pd.concat([self.dataframe, interior_df, boundary_df])
+             self.dataframe = pd.concat([self.dataframe, midpoint_df, interior_df, boundary_df])
          self.map.fill((0, 0, 0, 0))
 
      def generate_random_position(self, existing_positions):
@@ -126,14 +147,16 @@ class EnvironmentMap:
 
      def generate_obstacle_data(self):
          for key, val in self.obstacles.items():
-             print(key)
+             # If all attributes have been entered
              if all(k in val for k in ["count", "positions", "risk", "random"]):
                  rg = range(val["count"])
              else:
                  print(f"Error: Missing obstacle attributes: {key}")
                  continue
+             # If the count of the obstacle is greater than zero
              if val["count"] > 0:
                  existing_positions = []
+                 # If random positions = True
                  if self.obstacles[key]["random"]:
                      obs_pos = []
                      for i in rg:

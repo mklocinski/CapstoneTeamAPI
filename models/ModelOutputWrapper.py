@@ -69,13 +69,17 @@ db = SQLAlchemy()
 # ------------------------------------------------------------------------------- #
 # ------------- OutputWrapper(ModelObject): models output wrapper --------------- #
 # ------------------------------------------------------------------------------- #
+def basic_euclidean(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.linalg.norm(a - b)
 
 def nearest_obstacle_point(x,y, xy_array):
     xy_array = np.array(xy_array)
-    all_distances = np.sqrt((xy_array[:, 0] - x) ** 2 + (xy_array[:, 1] - y) ** 2)
+    all_distances = [basic_euclidean((x, y), point) for point in xy_array]
     min_distance = min(all_distances)
     nearest = xy_array[np.argmin(all_distances)]
-    return min_distance
+    return [nearest, min_distance]
 
 
 class OutputWrapper(gym.Wrapper):
@@ -139,35 +143,57 @@ class OutputWrapper(gym.Wrapper):
         """
         self.map_data['obstacles'] = [f"{i}-{j}" for i,j in zip(self.map_data["cstr_obstacle"],self.map_data["cint_obstacle_id"])]
         u_obs = self.map_data['obstacles'].unique()
-        obstacle_lookup = {obs: [(x,y) for x,y in zip(self.map_data[self.map_data['obstacles']==obs]['cflt_x_coord'],self.map_data[self.map_data['obstacles']==obs]['cflt_y_coord'])] for obs in u_obs}
+        obstacle_lookup = {}
+        for obs in u_obs:
+            data = self.map_data[self.map_data['obstacles'] == obs]
+            risk = [row['cflt_obstacle_risk'] for i, row in data.iterrows()].unique()
+            coords = [(row['cflt_x_coord'], row['cflt_y_corod']) for i, row in data.iterrows()]
+            midpoint = [(row['cflt_x_coord'], row['cflt_y_corod']) for i, row in data[data['cstr_point_type'] == 'midpoint'].iterrows()]
+            boundaries = [(row['cflt_x_coord'], row['cflt_y_corod']) for i, row in data[data['cstr_point_type'] == 'boundary'].iterrows()]
+            obstacle_lookup[obs] = {"risk": risk, "coords": coords, "midpoint": midpoint, "boundaries":boundaries}
         distance_data = []
-        for obstacle, coords in obstacle_lookup.items():
-            obstacle_risk = self.map_data[self.map_data["cstr_obstacle"]==obstacle]["cflt_obstacle_risk"].unique()
-            dists = [nearest_obstacle_point(drone[0], drone[1], coords) for drone in self.world.nodes]
-            dists_with_buffer = [nearest_obstacle_point(drone[0], drone[1], coords) + self.rai_params['buffer_zone_size'] for drone in self.world.nodes]
-            collisions = [1 if round(dist,0) == 0 else 0 for dist in dists]
+        for obstacle, data in obstacle_lookup.items():
+            # Distance between each drone and obstacle
+            obs_distance = [nearest_obstacle_point(drone[0], drone[1], data["coords"]) for drone in self.world.nodes]
+            # % of buffer zone entered by each drone
+            obs_distance_buffer = [(self.rai_params['buffer_zone_size'] - nearest_obstacle_point(drone[0], drone[1], data["coords"])[1])/self.rai_params['buffer_zone_size'] for drone in self.world.nodes]
+            # Distance between each drone and obstacle boundary
+            obs_boundary_distance = [nearest_obstacle_point(drone[0], drone[1], data["boundaries"]) for drone in self.world.nodes]
+            # Distance between each drone and obstacle midpoint
+            obs_midpoint_distance = [nearest_obstacle_point(drone[0], drone[1], data["midpoint"]) for drone in self.world.nodes]
+            # If collision, distance between midpoint and drone's nearest boundary point
+            boundary_midpoint = [basic_euclidean(a[0], obstacle_lookup[obstacle]['midpoint']) if round(a[1],0) == 0 else 0 for a, b in zip(obs_boundary_distance, obs_distance)]
+
+            # >  Calculations
+            # # >  Collisions: if distance from dists = 0, then collision
+            collisions = [1 if round(dist[1],0) == 0 else 0 for dist in obs_distance]
+            # # >  Basic Collision Penalties
             collision_pen = sum([self.rai_params["collision_penalty"] * collision for collision in collisions])
-            risks = [obstacle_risk if round(dist,0) == 0 else 0 for dist in dists]
-            buffer_penalty = [self.rai_params["buffer_entry_penalty"] if round(dist,0) == 0 else 0 for dist in dists_with_buffer]
+            # # >  Obstacle-Specific Collision Penalties
+            risks = [data["risk"] if round(dist[1],0) == 0 else 0 for dist in obs_distance]
+            # # >  Buffer Zone Entry Penalty
+            buffer_penalty = [self.rai_params["buffer_entry_penalty"]*dist if dist >= 0 else 0 for dist in obs_distance_buffer]
+            # # > Improvement Multiplier: (distance between drone and boundary)/(distance between midpoint and boundary
+            impr_mult = [round(a / b, 4) for a, b in zip(obs_boundary_distance, boundary_midpoint)]
+
             df = pd.DataFrame({
                 "cint_drone_id":[i for i, el in enumerate(self.world.nodes)],
                 "cstr_obstacle":[obstacle.split("-")[0] for drone in self.world.nodes],
                 "cstr_obstacle_id": [obstacle.split("-")[1] for drone in self.world.nodes],
-                "cflt_distance_to_obstacle":dists,
-                "cflt_distance_to_buffer": dists_with_buffer,
+                "cflt_distance_to_obstacle":[dist[1] for dist in obs_distance],
+                "cflt_distance_to_buffer": [dist[1] for dist in obs_distance_buffer],
                 "cint_collisions":collisions,
                 "cint_collision_penalties":collision_pen,
                 "cint_risk": risks,
-                "cint_buffer_penalty": buffer_penalty
+                "cint_buffer_penalty": buffer_penalty,
+                "cflt_midpoint_dists": [dist[1] for dist in obs_midpoint_distance], # New, not added to db as of 11/15
+                "cflt_nearest_boundary_dist": [dist[1] for dist in obs_boundary_distance],
+                "cflt_midpoint_to_boundary":boundary_midpoint
             })
             distance_data.append(df)
         dfs = pd.concat(distance_data)
-        dfs["cflt_distance_to_obstacle"] = pd.to_numeric(dfs["cflt_distance_to_obstacle"], errors="coerce")
-        dfs["cflt_distance_to_buffer"] = pd.to_numeric(dfs["cflt_distance_to_obstacle"], errors="coerce")
-        dfs["cint_collisions"] = pd.to_numeric(dfs["cint_collisions"], errors="coerce")
-        dfs["cint_collision_penalties"] = pd.to_numeric(dfs["cint_collision_penalties"], errors="coerce")
-        dfs["cint_risk"] = pd.to_numeric(dfs["cint_risk"], errors="coerce")
-        dfs["cint_buffer_penalty"] = pd.to_numeric(dfs["cint_buffer_penalty"], errors="coerce")
+        numeric_cols = [col for col in dfs.columns if col.startswith(("cflt", "cint"))]
+        dfs[numeric_cols] = dfs[numeric_cols].apply(pd.to_numeric, errors="coerce")
         dfs = dfs.fillna(0)
 
         self.obstacle_df = dfs.groupby("cint_drone_id", as_index=False).agg(
@@ -175,8 +201,16 @@ class OutputWrapper(gym.Wrapper):
              "cint_collisions":"sum",
              "cint_risk":"sum",
              "cint_collision_penalties": "sum",
-             "cint_buffer_penalty":"sum"}
+             "cint_buffer_penalty":"sum",
+             "cflt_midpoint_dists":"sum",
+             "cflt_nearest_boundary_dist":"sum",
+             "cflt_midpoint_to_boundary":"sum"}
+
         )
+        self.obstacle_df["cflt_improvement_multiplier"] = (
+                self.obstacle_df["cflt_nearest_boundary_dist"] / self.obstacle_df["cflt_midpoint_to_boundary"]
+        )
+        self.obstacle_df["cflt_improvement_multiplier"] = self.obstacle_df["cflt_improvement_multiplier"].fillna(0)
         self.map_data = self.map_data.drop('obstacles', axis=1)
 
     def get_rai_reward(self, actions):
@@ -188,24 +222,28 @@ class OutputWrapper(gym.Wrapper):
         dist_rew = np.mean(all_distances_cap_norm)
         action_pen = 0.001 * np.mean(actions ** 2)
 
-        # All possible RAI penalties
+        # RAI penalties
         ## Avoid Basic Collision
         collision_pen = self.obstacle_df["cint_collision_penalties"].to_numpy()
-        obs_specific_penalty = self.obstacle_df["cint_risk"].to_numpy()
 
         ## Avoid Buffer Zone
         all_buffer_penalties = self.obstacle_df["cint_buffer_penalty"].to_numpy()
 
-        if self.rai_params["avoid_collisions"]==True:
+        # RAI Coefficients
+        ## Avoid Collisions?
+        avoid_collisions = 1 if self.rai_params["avoid_collisions"]==True else 0
 
-            r = - dist_rew - action_pen - collision_pen - obs_specific_penalty
-            r = np.ones((self.nr_agents,)) * r
-        elif self.rai_params["avoid_buffer_zones"] == True:
-            r = - dist_rew - action_pen - collision_pen - obs_specific_penalty - all_buffer_penalties
-            r = np.ones((self.nr_agents,)) * r
-        else:
-            r = - dist_rew - action_pen
-            r = np.ones((self.nr_agents,)) * r
+        ## Avoid buffer zones?
+        avoid_buffer_zones = 1 if self.rai_params["avoid_buffer_zones"] == True else 0
+
+        ## Improvement Multiplier
+        improvement_multiplier = self.obstacle_df["cflt_improvement_multiplier"].to_numpy()
+
+        # Final RAI term
+        rai = avoid_collisions*sum((collision_pen)*improvement_multiplier) - avoid_buffer_zones*sum(all_buffer_penalties)
+
+        r = - dist_rew - action_pen - rai
+        r = np.ones((self.nr_agents,)) * r
 
         return r
 
@@ -218,28 +256,37 @@ class OutputWrapper(gym.Wrapper):
         dist_rew = np.mean(all_distances_cap_norm)
         action_pen = 0.001 * np.mean(actions ** 2)
 
-        # All possible RAI penalties
-        all_collisions = self.obstacle_df["cint_collisions"].to_numpy()
-        all_obstacle_distances = self.obstacle_df["cflt_distance_to_obstacle"].to_numpy()
-        all_obstacles_cap = np.where(all_obstacle_distances > self.comm_radius, self.comm_radius,
-                                     all_obstacle_distances)
+        # RAI penalties
         ## Avoid Basic Collision
+        collisions = self.obstacle_df["cint_collision"].to_numpy()
+        obs_distance = self.obstacle_df["cflt_distance_to_obstacle"].to_numpy()
         collision_pen = self.obstacle_df["cint_collision_penalties"].to_numpy()
-        obs_specific_penalty = self.obstacle_df["cint_risk"].to_numpy()
-        r_collisions = - dist_rew - action_pen - collision_pen - obs_specific_penalty
 
         ## Avoid Buffer Zone
         all_buffer_penalties = self.obstacle_df["cint_buffer_penalty"].to_numpy()
-        r_collision_buffer = - dist_rew - action_pen - collision_pen - obs_specific_penalty - all_buffer_penalties
+
+        # RAI Coefficients
+        ## Avoid Collisions?
+        avoid_collisions = 1 if self.rai_params["avoid_collisions"] == True else 0
+
+        ## Avoid buffer zones?
+        avoid_buffer_zones = 1 if self.rai_params["avoid_buffer_zones"] == True else 0
+
+        ## Improvement Multiplier
+        improvement_multiplier = self.obstacle_df["cflt_improvement_multiplier"].to_numpy()
+
+        # Final RAI term
+        rai = improvement_multiplier * sum((collision_pen) * avoid_collisions) - avoid_buffer_zones * sum(all_buffer_penalties)
 
         rai_data = {
             "cflt_distance_reward": dist_rew,
             "cflt_action_penalty": action_pen,
-            "cflt_reward_with_collisions": r_collisions,
-            "cflt_reward_with_collisions_buffer": r_collision_buffer,
-            "cint_all_collisions": all_collisions,
-            "cflt_capped_obstacle_distance": all_obstacles_cap,
-            "cflt_obstacle_distance": all_obstacle_distances
+            "cflt_rai_reward": rai,
+            "cflt_basic_collision_penalty": collision_pen,
+            "cint_buffer_zone_entry_penalty": all_buffer_penalties,
+            "cint_all_collisions": collisions,
+            "cflt_obstacle_distance": obs_distance,
+            "cflt_improvement_multiplier": improvement_multiplier
         }
         return rai_data
 
@@ -265,7 +312,8 @@ class OutputWrapper(gym.Wrapper):
             "cflt_distance_reward": rai_reward["cflt_distance_reward"],
             "cflt_action_penalty": rai_reward["cflt_action_penalty"],
             "cint_drone_collisions": rai_reward["cint_all_collisions"],
-            "cflt_drone_obstacle_distance": rai_reward["cflt_obstacle_distance"]
+            "cflt_drone_obstacle_distance": rai_reward["cflt_obstacle_distance"],
+            "cflt_improvement_multiplier": rai_reward["cflt_improvement_multiplier"]
         }
 
         self.log_data.append(log_entry)
@@ -341,13 +389,14 @@ class OutputObject:
     def make_tbl_model_runs(self):
         start_time = time.time()
 
-        if len(self.output) > 0:
-            run_date = self.output[0]["cdtm_run_date"]
-            terminal_episode = [self.output[i]["cbln_terminal"] for i in range(len(self.output))].index(False)
-            end_time = time.time()
-            query_duration = end_time - start_time
-            print(f"make_tbl_model_runs duration: {query_duration:.2f} seconds")
-            return pd.DataFrame({"cdtm_run_date": [run_date], "cbln_terminal_episode": [terminal_episode]})
+        if self.output is not None:
+            if len(self.output) > 0:
+                run_date = self.output[0]["cdtm_run_date"]
+                terminal_episode = [self.output[i]["cbln_terminal"] for i in range(len(self.output))].index(False)
+                end_time = time.time()
+                query_duration = end_time - start_time
+                print(f"make_tbl_model_runs duration: {query_duration:.2f} seconds")
+                return pd.DataFrame({"cdtm_run_date": [run_date], "cbln_terminal_episode": [terminal_episode]})
 
     def make_tbl_model_run_params(self):
         start_time = time.time()
@@ -388,6 +437,7 @@ class OutputObject:
             angular_velocity = []
             collisions = []
             obstacle_distances = []
+            impr_mult = []
             for episode in range(len(self.output)):
                 for drone in range(self.output[0]["cint_n_drones"]):
                     episodes.append(self.output[episode]["cint_episode"])
@@ -399,6 +449,7 @@ class OutputObject:
                     angular_velocity.append(self.output[episode]["local_state"][drone][4])
                     collisions.append(self.output[episode]["cint_drone_collisions"][drone])
                     obstacle_distances.append(self.output[episode]["cflt_drone_obstacle_distance"][drone])
+                    impr_mult.append(self.output[episode]["cflt_improvement_multiplier"][drone])
             end_time = time.time()
             query_duration = end_time - start_time
             print(f"make_tbl_local_state duration: {query_duration:.2f} seconds")
@@ -411,8 +462,8 @@ class OutputObject:
                 "cflt_linear_velocity": linear_velocity,
                 "cflt_angular_velocity": angular_velocity,
                 "cint_drone_collisions":collisions,
-                "cflt_drone_obstacle_distance":obstacle_distances
-
+                "cflt_drone_obstacle_distance":obstacle_distances,
+                "cflt_improvement_multiplier": impr_mult
             })
 
     def make_tbl_global_state(self):
@@ -490,17 +541,18 @@ class OutputObject:
 
     def make_tbl_run_status(self):
 
-        if len(self.run_data) > 0:
-            episodes = [self.run_data[i]["episode"] for i in range(len(self.run_data))]
-            status = [self.run_data[i]["status"] for i in range(len(self.run_data))]
-            time = [self.run_data[i]["time"] for i in range(len(self.run_data))]
-            start_time = time.time()
-            end_time = time.time()
-            query_duration = end_time - start_time
-            print(f"make_tbl_run_status duration: %.2f seconds", query_duration)
-            return pd.DataFrame({"cint_episode_id": episodes,
-                                 "cstr_run_status": status,
-                                 "cdtm_status_timestamp": time})
+        if self.run_data is not None:
+            if len(self.run_data) > 0:
+                episodes = [self.run_data[i]["episode"] for i in range(len(self.run_data))]
+                status = [self.run_data[i]["status"] for i in range(len(self.run_data))]
+                time = [self.run_data[i]["time"] for i in range(len(self.run_data))]
+                start_time = time.time()
+                end_time = time.time()
+                query_duration = end_time - start_time
+                print(f"make_tbl_run_status duration: %.2f seconds", query_duration)
+                return pd.DataFrame({"cint_episode_id": episodes,
+                                     "cstr_run_status": status,
+                                     "cdtm_status_timestamp": time})
 
     def generate_tables(self):
         self.tables = {
@@ -511,8 +563,8 @@ class OutputObject:
             #"tbl_global_state": self.make_tbl_global_state(),
             "tbl_local_state": self.make_tbl_local_state(),
             "tbl_map_data": self.make_tbl_map_data(),
-            "tbl_rai": self.make_tbl_rai()
-            #"tbl_run_status": self.make_tbl_run_status()
+            "tbl_rai": self.make_tbl_rai(),
+            "tbl_run_status": self.make_tbl_run_status()
         }
 
     def pickle_tables(self):
