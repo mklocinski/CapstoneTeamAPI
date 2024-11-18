@@ -62,6 +62,7 @@ class tbl_local_state(db.Model):
     cint_drone_collisions = db.Column(db.Integer, primary_key=False)
     cflt_drone_obstacle_distance = db.Column(db.Float, primary_key=False)
     cflt_improvement_multiplier = db.Column(db.Float, primary_key=False)
+    cflt_drone_damage = db.Column(db.Float, primary_key=False)
 
 class tbl_global_state(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)

@@ -22,6 +22,12 @@ def triangle_points(point, length):
     t = [point[0]+(0.5*length), point[1]+height]
     return point, br, t
 
+def enforce_minimum_size(size, minimum=1):
+    if isinstance(size, tuple):
+        return tuple(max(s, minimum) for s in size)
+    return max(size, minimum)
+
+
 class EnvironmentMap:
      def __init__(self,
                   map_size=[100, 100],
@@ -48,9 +54,9 @@ class EnvironmentMap:
                            'animals': animals}
 
          self.scaler = {'no-fly': 1/5,
-                           'humans': 1/100,
+                           'humans': 1/8,
                            'buildings': 1/50,
-                           'trees': 1/20,
+                           'trees': 1/8,
                            'animals': 1/20}
 
          self.obstacle_func = {'no-fly': 'rectangle',
@@ -77,7 +83,7 @@ class EnvironmentMap:
              midpoint_x = int(np.mean(all_x_coords))
              midpoint_y = int(np.mean(all_y_coords))
          else:
-             midpoint_x, midpoint_y = None, None  # Handle empty case
+             midpoint_x, midpoint_y = all_points[0][0], all_points[0][1]  # Handle empty case
          boundary_df = pd.DataFrame({
              'cint_obstacle_id':[id for pos in boundary],
              'cstr_obstacle':[obstacle for pos in boundary],
@@ -92,7 +98,7 @@ class EnvironmentMap:
              'cstr_obstacle': [obstacle for pos in interior],
              'cflt_obstacle_risk': [self.obstacles[obstacle]["risk"] for pos in interior],
              'cstr_obstacle_color': [self.colors[obstacle] for pos in interior],
-             'cstr_point_type': ["boundary" for pos in interior],
+             'cstr_point_type': ["interior" for pos in interior],
              'cflt_x_coord': [pos[0] for pos in interior],
              'cflt_y_coord': [pos[1] for pos in interior]
          })
@@ -123,8 +129,9 @@ class EnvironmentMap:
      def obstacle_coords(self, obstacle, rg):
          self.map.fill((0, 0, 0, 0))
          if self.obstacle_func[obstacle] == 'circle':
-             self.obstacles[obstacle]["radius"] = [r.randint(0, 50)*self.scaler[obstacle] for i in rg]
+             self.obstacles[obstacle]["radius"] = [enforce_minimum_size(r.randint(0, 50)*self.scaler[obstacle]) for i in rg]
              zipper = zip(self.obstacles[obstacle]["positions"], self.obstacles[obstacle]["radius"])
+             print(f"Radius: {self.obstacles[obstacle]['radius']}")
              for i, el in enumerate(zipper, start=1):
                  circle(self.map, self.colors[obstacle], el[0], el[1])
                  self.get_shape_data(i, obstacle)
@@ -132,14 +139,14 @@ class EnvironmentMap:
          elif self.obstacle_func[obstacle] == 'rectangle':
              l = r.randint(0, self.map_size[0]*self.scaler[obstacle])
              w = r.randint(0, self.map_size[0]*self.scaler[obstacle])
-             self.obstacles[obstacle]["wh"] = [(r.randint(0, 50), r.randint(0, 50)) for i in rg]
+             self.obstacles[obstacle]["wh"] = [enforce_minimum_size((r.randint(0, 50), r.randint(0, 50))) for i in rg]
              zipper = zip(self.obstacles[obstacle]["positions"], self.obstacles[obstacle]["wh"])
              for i, el in enumerate(zipper, start=1):
                  rectangle(self.map, self.colors[obstacle], (el[0][0], el[0][1], el[1][0], el[1][1]))
                  self.get_shape_data(i, obstacle)
 
          elif self.obstacle_func[obstacle] == 'triangle':
-             l = r.randint(0, self.map_size[0] * self.scaler[obstacle])
+             l = r.randint(0, round(self.map_size[0] * self.scaler[obstacle],0))
              self.obstacles[obstacle]["tri"] = [triangle_points(point, l) for point in self.obstacles[obstacle]["positions"]]
              for i, el in enumerate(self.obstacles[obstacle]["tri"], start=1):
                     triangle(self.map, self.colors[obstacle], el)
