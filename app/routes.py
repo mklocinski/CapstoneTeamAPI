@@ -26,6 +26,7 @@ warnings.filterwarnings("ignore")
 # Model Variables
 model_status = {"status": "idle", "episode": 0, "run_id":0}
 model_thread = None
+stop_flag = threading.Event()
 logging.basicConfig(level=logging.INFO)
 thread_logger = logging.getLogger("model_thread")
 completion_queue = queue.Queue()
@@ -38,20 +39,21 @@ model_output_path = "/CapstoneTeamAPI/utils/pickles/model_output.pkl"
 
 @main.route('/')
 def home():
+    setup_flag_files()
     return jsonify({"message": "Welcome to the XRAI API. Please refer to the documentation for available endpoints."}), 200
 
-def make_environment_map(map_size,no_fly_zones,humans,buildings,trees,animals,
-                         no_fly_zones_damage,humans_damage,buildings_damage,trees_damage,animals_damage):
+# def make_environment_map(map_size,no_fly_zones,humans,buildings,trees,animals,fires,
+#                          no_fly_zones_damage,humans_damage,buildings_damage,trees_damage,animals_damage, fire_damage):
+def make_environment_map(world, map_params):
     current_app.logger.info(">> Generating map data")
-    import models.MapPackage as m
-    amap = m.EnvironmentMap(map_size=[int(map_size),int(map_size)],
-                            no_fly_zones = dict(count=int(no_fly_zones), random=True, positions=[], sizes=[], risk=no_fly_zones_damage),
-                            humans = dict(count=int(humans), random=True, positions=[], sizes=[], risk=humans_damage),
-                            buildings = dict(count=int(buildings), random=True, positions=[], sizes=[], risk=buildings_damage),
-                            trees = dict(count=int(trees), random=True, positions=[], sizes=[], risk=trees_damage),
-                            animals = dict(count=int(animals), random=True, positions=[], sizes=[], risk=animals_damage))
-    amap.generate_obstacle_data()
-    map_data = amap.dataframe.reset_index(drop=True).to_json()
+    #map_params["map_size"] = [int(world),int(world)]
+    current_app.logger.info(map_params)
+    import models.ObstacleGenerator as m
+    obs_map = m.EnvironmentMap(**map_params)
+    current_app.logger.info(">> >> Map object created")
+    obs_map.generate_obstacle_data()
+    map_data = obs_map.dataframe.reset_index(drop=True).to_json()
+
     current_app.logger.info(">> Map data generated")
 
     with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json') as temp_file:
@@ -170,18 +172,8 @@ def post_standard_run_xrai_system():
             world_size=json.loads(environ_params)
             map_params = json.loads(map_params)
             current_app.logger.info(map_params)
-            map_path = make_environment_map(world_size.get("world_size"),
-                            map_params["number_of_no-fly_zones"],
-                            map_params["number_of_buildings"],
-                            map_params["number_of_humans"],
-                            map_params["number_of_trees"],
-                            map_params["number_of_animals"],
-                            map_params["no-fly_zone_collision_damages"],
-                            map_params["building_collision_damages"],
-                            map_params["human_collision_damage"],
-                            map_params["tree_collision_damages"],
-                            map_params["animal_collision_damage"]
-                                            )
+            map_path = make_environment_map(world_size.get("world_size"), map_params)
+
             current_app.logger.info("make_environment_map completed")
         except Exception as e:
             current_app.logger.info(f"Error calling make_environment_map: {e}")
@@ -194,6 +186,7 @@ def post_standard_run_xrai_system():
 
         # Run model asynchronously
         set_model_status("running")
+        current_app.logger.info(f"Map path: {map_path}")
         start_model_thread(map_path, environ_params, model_params, rai_params, run_id=model_status["run_id"])
         return jsonify({'model': 'Successful run'}), 200
     except Exception as e:
@@ -229,24 +222,41 @@ def run_model(temp_file_path, environ_params, model_params, rai_params, run_id):
         with subprocess.Popen(run_model_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, text=True,
                               env=env) as proc:
             for line in proc.stdout:
+                if stop_flag.is_set():
+                    thread_logger.info("Stop signal received. Terminating model run.")
+                    proc.terminate()  # Terminate the subprocess
+                    break
                 if "Episode:" in line:
                     episode_number = int(line.split("Episode:")[-1].strip())
                     model_status["episode"] = episode_number
                 thread_logger.info(f"Subprocess Output: {line.strip()}")
             for line in proc.stderr:
+                if stop_flag.is_set():
+                    thread_logger.info("Stop signal received. Terminating model run.")
+                    proc.terminate()
+                    break
                 thread_logger.info(f"Subprocess Error: {line.strip()}")
 
         proc.wait()
-        model_status["status"] = "completed" if proc.returncode == 0 else "error"
+        if stop_flag.is_set():
+            model_status["status"] = "stopped"
+        else:
+            model_status["status"] = "completed" if proc.returncode == 0 else "error"
+        setup_flag_files()
         return proc.returncode == 0
     except Exception as e:
         db.session.rollback()
         model_status["status"] = "error"
         thread_logger.info(f"An error occurred: {str(e)}")
         completion_queue.put({"status": "error", "error": str(e), "run_id": run_id})
+        setup_flag_files()
         return False
 
 def start_model_thread(temp_file_path, environ_params, model_params, rai_params, run_id):
+    global model_thread, stop_flag
+    if model_thread is not None and model_thread.is_alive():
+        return jsonify({"error": "Model is already running"}), 400
+    stop_flag.clear()
     current_app.logger.info(">> Creating model thread")
     model_thread = threading.Thread(
         target=run_model,
@@ -267,6 +277,21 @@ def post_play_model():
     with open(status_path, "w") as f:
         f.write("running")
     return jsonify({"status": "Model resumed"}), 200
+
+@main.route('/model/stop', methods=['GET'])
+def stop_model():
+    global stop_flag
+    stop_flag.set()  # Signal the thread to stop
+    set_model_status("idle")  # Update status file
+    model_status["status"] = "idle"
+    return jsonify({"status": "Model stopped"}), 200
+
+def cleanup_after_stop():
+    if os.path.exists(model_output_path):
+        os.remove(model_output_path)
+    setup_flag_files()  # Reset flag files
+    model_status.update({"status": "idle", "episode": 0, "run_id": 0})
+
 
 @main.route('/model/current_episode', methods=['GET'])
 def get_current_episode():
@@ -364,10 +389,10 @@ def get_last_run_rai():
     try:
         last_run_id = db.session.query(func.max(tbl_model_runs.cflt_run_id)).scalar()
         if last_run_id:
-            rewards = db.session.query(tbl_rai).filter(tbl_rewards.cflt_run_id == last_run_id).all()
-            serialized_rai_params = [reward.__dict__ for reward in rewards]
-            for reward in serialized_rai_params:
-                reward.pop('_sa_instance_state', None)
+            all_rai = db.session.query(tbl_rai).filter(tbl_rai.cflt_run_id == last_run_id).all()
+            serialized_rai_params = [rai.__dict__ for rai in all_rai]
+            for rai in serialized_rai_params:
+                rai.pop('_sa_instance_state', None)
             return jsonify(serialized_rai_params), 200 if serialized_rai_params else 204
         else:
             return jsonify({'message': 'No RAI data found for the last run.'}), 204
@@ -474,3 +499,47 @@ def api_record_model_episode():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@main.route('/database/last_run/drone_damage_count', methods=['GET'])
+def get_unique_drones_with_damage():
+    try:
+        # Get the most recent cflt_run_id
+        last_run_id = db.session.query(func.max(tbl_model_runs.cflt_run_id)).scalar()
+        current_app.logger.info(f"Retrieved last_run_id: {last_run_id}")
+
+        if last_run_id:
+            # Query unique cint_drone_id where cflt_drone_damage > 0
+            unique_drones = db.session.query(tbl_local_state.cint_drone_id).distinct() \
+                .filter(tbl_local_state.cflt_run_id == last_run_id) \
+                .filter(tbl_local_state.cflt_drone_damage > 0).all()
+
+            unique_drone_count = len(unique_drones)
+            current_app.logger.info(f"Unique drone count with damage: {unique_drone_count}")
+
+            return jsonify({'unique_drones_with_damage': unique_drone_count}), 200
+        else:
+            return jsonify({'message': 'No local state data found for the last run.'}), 204
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving unique drones with damage: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@main.route('/database/last_run/total_drone_damage', methods=['GET'])
+def get_total_drone_damage():
+    try:
+        # Get the most recent cflt_run_id
+        last_run_id = db.session.query(func.max(tbl_model_runs.cflt_run_id)).scalar()
+        current_app.logger.info(f"Retrieved last_run_id: {last_run_id}")
+
+        if last_run_id:
+            # Query the sum of cflt_drone_damage
+            total_damage = db.session.query(func.sum(tbl_local_state.cflt_drone_damage)) \
+                .filter(tbl_local_state.cflt_run_id == last_run_id).scalar()
+
+            total_damage = total_damage or 0  # Ensure a result of 0 if no damage rows exist
+            current_app.logger.info(f"Total drone damage: {total_damage}")
+
+            return jsonify({'total_drone_damage': total_damage}), 200
+        else:
+            return jsonify({'message': 'No local state data found for the last run.'}), 204
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving total drone damage: {str(e)}")
+        return jsonify({'error': str(e)}), 500

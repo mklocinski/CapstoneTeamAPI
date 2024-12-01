@@ -4,8 +4,7 @@ import numpy as np
 import json
 import pandas as pd
 # Removed manual project root manipulation, since Heroku usually installs everything correctly within a defined environment
-import WrappedModel as wm
-import TestingMapPackage as mp
+import XRAI_Model as wm
 
 
 # -----------------------------------------------------------------------------#

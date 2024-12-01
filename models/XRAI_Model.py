@@ -1,9 +1,7 @@
-import sys
 import os
 import pickle
-from ModelOutputWrapper import OutputWrapper, OutputObject
+from XRAI_Environment import OutputWrapper
 from CheckpointWrapper import learn_with_checkpoints
-import numpy as np
 from mpi4py import MPI
 import datetime
 from deep_rl_for_swarms.common import logger, cmd_util
@@ -15,23 +13,7 @@ from deep_rl_for_swarms.ma_envs.envs.point_envs import rendezvous
 # -------------------------------------------------------------------------- #
 # ------------------------ Default Model Vars  ----------------------------- #
 # -------------------------------------------------------------------------- #
-# environment='Rendezvous'
-# environment_params = dict(nr_agents=20,
-#                                        obs_mode='sum_obs_acc',
-#                                        comm_radius=100 * np.sqrt(2),
-#                                        world_size=100,
-#                                        distance_bins=8,
-#                                        bearing_bins=8,
-#                                        torus=False,
-#                                        dynamics='unicycle_acc')
-# model_params = dict(timesteps_per_batch=10,
-#                                       max_kl=0.01,
-#                                       cg_iters=10,
-#                                     cg_damping=0.1,
-#                                     gamma=0.99,
-#                                      lam=0.98,
-#                                      vf_iters=5,
-#                                      vf_stepsize=1e-3)
+
 
 def load_training_state(current_state, policy_fn):
     act_wrapper = ActWrapper.load(current_state, policy_fn)
@@ -92,9 +74,44 @@ def TrainWrapper(
 
         print("Start training....")
 
-        if current_state[0] is None:
-            print("Implement output wrapper...")
-            output_logger = OutputWrapper(env,
+        # if current_state[0] is None:
+        #     print("Implement output wrapper...")
+        #     output_logger = OutputWrapper(env,
+        #                                   env_type=environment,
+        #                                   environment_params=environment_params,
+        #                                   model_params=model_params,
+        #                                   map_object=map_object,
+        #                                   rai_params=rai_params,
+        #                                   log_file=os.path.join(log_dir, 'output.json'),
+        #                                   param_file=os.path.join(log_dir, 'param.json'),
+        #                                   map_file=os.path.join(log_dir, 'map.json'))
+        #     learn_with_checkpoints(output_logger, policy_fn,
+        #                max_timesteps=10,
+        #                act_wrapper=None,
+        #                 episodes_so_far=0,
+        #                 timesteps_so_far=0,
+        #                 iters_so_far=0,
+        #                **model_params)
+        # else:
+        #     print("Implement output wrapper...")
+        #     output_logger = OutputWrapper(env,
+        #                                   env_type=environment,
+        #                                   environment_params=environment_params,
+        #                                   model_params=model_params,
+        #                                   map_object=map_object,
+        #                                   log_file=os.path.join(log_dir, 'output.json'),
+        #                                   param_file=os.path.join(log_dir, 'param.json'),
+        #                                   map_file=os.path.join(log_dir, 'map.json'))
+        #     act_wrapper, episodes_so_far, timesteps_so_far, iters_so_far = load_training_state(current_state, policy_fn)
+        #     learn_with_checkpoints(output_logger, policy_fn,
+        #                    max_timesteps=10,
+        #                    act_wrapper=act_wrapper,
+        #                    episodes_so_far=episodes_so_far,
+        #                    timesteps_so_far=timesteps_so_far,
+        #                    iters_so_far=iters_so_far,
+        #                    **model_params)
+        print("Implement output wrapper...")
+        output_logger = OutputWrapper(env,
                                           env_type=environment,
                                           environment_params=environment_params,
                                           model_params=model_params,
@@ -103,31 +120,13 @@ def TrainWrapper(
                                           log_file=os.path.join(log_dir, 'output.json'),
                                           param_file=os.path.join(log_dir, 'param.json'),
                                           map_file=os.path.join(log_dir, 'map.json'))
-            learn_with_checkpoints(output_logger, policy_fn,
-                       max_timesteps=10,
-                       act_wrapper=None,
-                        episodes_so_far=0,
-                        timesteps_so_far=0,
-                        iters_so_far=0,
-                       **model_params)
-        else:
-            print("Implement output wrapper...")
-            output_logger = OutputWrapper(env,
-                                          env_type=environment,
-                                          environment_params=environment_params,
-                                          model_params=model_params,
-                                          map_object=map_object,
-                                          log_file=os.path.join(log_dir, 'output.json'),
-                                          param_file=os.path.join(log_dir, 'param.json'),
-                                          map_file=os.path.join(log_dir, 'map.json'))
-            act_wrapper, episodes_so_far, timesteps_so_far, iters_so_far = load_training_state(current_state, policy_fn)
-            learn_with_checkpoints(output_logger, policy_fn,
-                           max_timesteps=10,
-                           act_wrapper=act_wrapper,
-                           episodes_so_far=episodes_so_far,
-                           timesteps_so_far=timesteps_so_far,
-                           iters_so_far=iters_so_far,
-                           **model_params)
+        learn_with_checkpoints(output_logger, policy_fn,
+                                   max_timesteps=10,
+                                   act_wrapper=None,
+                                   episodes_so_far=0,
+                                   timesteps_so_far=0,
+                                   iters_so_far=0,
+                                   **model_params)
 
         output_logger.close()
         env.close()

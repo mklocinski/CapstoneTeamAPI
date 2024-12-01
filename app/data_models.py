@@ -86,18 +86,26 @@ class tbl_rewards(db.Model):
     cflt_reward = db.Column(db.Float, unique=False, nullable=False)
     cflt_distance_reward = db.Column(db.Float, unique=False)
     cflt_action_penalty = db.Column(db.Float, unique=False)
-
+    cflt_target_distance_reward = db.Column(db.Float, unique=False)
+    cint_all_collisions = db.Column(db.Integer, primary_key=False)
+    cflt_drone_obstacle_distance = db.Column(db.Float, unique=False)
+    cflt_improvement_multiplier = db.Column(db.Float, unique=False)
 
 class tbl_map_data(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     cflt_run_id = db.Column(db.Float, primary_key=False)
-    cflt_x_coord = db.Column(db.Float, unique=False)
-    cflt_y_coord = db.Column(db.Float, unique=False)
-    cstr_point_type = db.Column(db.String, unique=False)
     cint_obstacle_id = db.Column(db.Integer, unique=False)
     cstr_obstacle = db.Column(db.String, unique=False)
+    cstr_obstacle_shape = db.Column(db.String, unique=False)
     cflt_obstacle_risk = db.Column(db.Float, unique=False)
     cstr_obstacle_color = db.Column(db.String, unique=False)
+    cflt_midpoint_x_coord = db.Column(db.Float, unique=False)
+    cflt_midpoint_y_coord = db.Column(db.Float, unique=False)
+    cstr_bottom_left = db.Column(db.String, unique=False)
+    cstr_bottom_right = db.Column(db.String, unique=False)
+    cstr_top_right = db.Column(db.String, unique=False)
+    cstr_top_left = db.Column(db.String, unique=False)
+    cstr_mid_top = db.Column(db.String, unique=False)
 
 class tbl_rai(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
