@@ -43,10 +43,17 @@ status_path = "/CapstoneTeamAPI/utils/status/model_status.txt"
 # -------------------------------------------------------------------------- #
 
 
-def check_status():
+def check_pause():
     if os.path.exists(status_path):
         with open(status_path, "r") as f:
             return f.read().strip() == "pause"
+    else:
+        return False
+
+def check_stop():
+    if os.path.exists(status_path):
+        with open(status_path, "r") as f:
+            return f.read().strip() == "stop"
     else:
         return False
 
@@ -82,8 +89,10 @@ class OutputWrapper(gym.Wrapper):
                  log_file="output.json",
                  param_file="param.json",
                  rai_file="rai.json",
-                 map_file="map.json"):
+                 map_file="map.json",
+                 run_type = "app"):
         super(OutputWrapper, self).__init__(env)
+        self.run_type = run_type
         self.run_date = datetime.datetime.now().strftime("%Y%m%d_%H%M_%S")
         self.env_type = env_type
         self.environment_params = environment_params
@@ -107,16 +116,22 @@ class OutputWrapper(gym.Wrapper):
         target_x = map_object[map_object["cstr_obstacle"] == 'target']['cflt_midpoint_x_coord'].iloc[0]
         target_y = map_object[map_object["cstr_obstacle"] == 'target']['cflt_midpoint_x_coord'].iloc[0]
         self.target_point = np.array([target_x, target_y])
-        self.time_limit = 1000,
+        self.time_limit = 30,
         self.ob_with_obstacles = []
 
+    def status_for_db(self):
+        if self.episode == 0:
+            return "model run initiated"
+        elif check_pause():
+            return "paused"
+        elif check_stop():
+            return "stopped"
+        else:
+            return "active"
 
-    def save_model_weights(self):
-        weights = self.model.get_weights()  # List of arrays
-        with open("model_weights.pkl", "wb") as f:
-            pickle.dump(weights, f)
-        print("Weights saved for episode:", self.episode)
-
+    @property
+    def timestep_limit(self):
+        return self.time_limit
 
     def run_parameters(self, **kwargs):
         env_entry = {de: val for de, val in self.environment_params.items()}
@@ -133,12 +148,6 @@ class OutputWrapper(gym.Wrapper):
                 # Generate random (x, y) position for the drone
                 x = self.env.world_size * ((0.95 - 0.05) * np.random.rand() + 0.05)
                 y = self.env.world_size * ((0.95 - 0.05) * np.random.rand() + 0.05)
-
-                # Check distance from all obstacles
-                # distances_to_obstacles = np.sqrt(
-                #     (self.map_data['cflt_x_coord'] - x) ** 2 +
-                #     (self.map_data['cflt_y_coord'] - y) ** 2
-                # )
 
                 distances_to_obstacles = [u.check_for_collision((x,y), row)[1] for i, row in self.map_data.iterrows()]
 
@@ -158,144 +167,6 @@ class OutputWrapper(gym.Wrapper):
 
         return obs
 
-    def get_collision_data(self):
-        """
-        Generates data on collisions for use in reward calculations.
-
-        Uses self.map_data, which is the output of MapPackage. For each object in self.map_data, the distance between
-        it and each of the drones is calculated using nearest_obstacle_point(), both with and without a buffer.
-        The obstacle distance and damage data is then aggregated at a drone-level.
-
-        Returns:
-            self.obstacle_df: Dataframe of collision data.
-        """
-        if len(self.map_data) > 0:
-
-            self.map_data['obstacles'] = [f"{i}-{j}" for i, j in
-                                          zip(self.map_data["cstr_obstacle"], self.map_data["cint_obstacle_id"])]
-            u_obs = self.map_data['obstacles'].unique()
-            obstacle_lookup = {}
-            # ob_with_obstacles = []
-            # for drone in self.world.nodes:
-            #     drone_obst_distance = [nearest_obstacle_point(drone[0], drone[1], self.map_data[self.map_data['obstacles'] == obs]) for obs in u_obs]
-            #     ob_with_obstacles.append([i[1] for i in drone_obst_distance])
-            # self.ob_with_obstacles = ob_with_obstacles
-            for obs in u_obs:
-                data = self.map_data[self.map_data['obstacles'] == obs]
-                risk = set([row['cflt_obstacle_risk'] for i, row in data.iterrows()])
-                if len(risk) == 1:
-                    risk = next(iter(risk))  # Get the single value from the set
-                else:
-                    raise ValueError("Risk set contains multiple values!")
-                coords = [(row['cflt_x_coord'], row['cflt_y_coord']) for i, row in data.iterrows()]
-                midpoint = [(row['cflt_x_coord'], row['cflt_y_coord']) for i, row in
-                            data[data['cstr_point_type'] == 'midpoint'].iterrows()]
-                boundaries = [(row['cflt_x_coord'], row['cflt_y_coord']) for i, row in
-                              data[data['cstr_point_type'] == 'boundary'].iterrows()]
-                obstacle_lookup[obs] = {"risk": risk, "coords": coords, "midpoint": midpoint, "boundaries": boundaries}
-            distance_data = []
-            for obstacle, data in obstacle_lookup.items():
-                # Distance between each drone and obstacle
-                obs_distance = [u.nearest_obstacle_point(drone[0], drone[1], data["coords"]) for drone in
-                                self.world.nodes]
-                obs_distance_norm = u.normalize_distances([i[1] for i in obs_distance])
-                # print("obs_distance")
-                # print(obs_distance)
-                # Collisions: if distance from dists = 0, then collision
-                collisions = [1 if dist[1] < 1 else 0 for dist in obs_distance]
-                # % of buffer zone entered by each drone
-                obs_distance_buffer = [(self.rai_params['buffer_zone_size'] -
-                                        u.nearest_obstacle_point(drone[0], drone[1], data["coords"])[1]) /
-                                       self.rai_params['buffer_zone_size'] if self.rai_params[
-                                                                                  'buffer_zone_size'] > 0 else 0 for
-                                       drone in self.world.nodes]
-                # print("obs_distance_buffer")
-                # print(obs_distance_buffer)
-                # Distance between each drone and obstacle boundary
-                obs_boundary_distance = [
-                    u.nearest_obstacle_point(drone[0], drone[1], data["boundaries"]) if len(data["boundaries"]) > 0 else [
-                        data["midpoint"], 1] for drone in self.world.nodes]
-                obs_boundary_distance = [ob_bd_dist if collision == 1 else [ob_bd_dist[0], 0] for ob_bd_dist, collision
-                                         in zip(obs_boundary_distance, collisions)]
-                # print("obs_boundary_distance")
-                # print(obs_boundary_distance)
-                # Distance between each drone and obstacle midpoint
-                obs_midpoint_distance = [u.nearest_obstacle_point(drone[0], drone[1], data["midpoint"]) for drone in
-                                         self.world.nodes]
-                # print("obs_midpoint_distance")
-                # print(obs_midpoint_distance)
-                # If collision, distance between midpoint and drone's nearest boundary point
-                boundary_midpoint = [u.basic_euclidean(a[0], obstacle_lookup[obstacle]['midpoint']) if c == 1 else 0 for
-                                     a, b, c in zip(obs_boundary_distance, obs_distance, collisions)]
-                # print("boundary_midpoint")
-                # print(boundary_midpoint)
-
-                # >  Calculations
-                # # >  Basic Collision Penalties
-                collision_pen = [self.rai_params["collision_penalty"] * collision for collision in collisions]
-                # # >  Obstacle-Specific Collision Penalties
-                risks = [data["risk"] * collision for collision in collisions]
-                # # >  Buffer Zone Entry Penalty
-                buffer_penalty = [self.rai_params["buffer_entry_penalty"] * dist if dist >= 0 else 0 for dist in
-                                  obs_distance_buffer]
-                # # > Improvement Multiplier: (distance between drone and boundary)/(distance between midpoint and boundary
-                # impr_mult = [round(a / b, 4) for a, b in zip(obs_boundary_distance, boundary_midpoint)]
-
-                df = pd.DataFrame({
-                    "cint_drone_id": [i for i, el in enumerate(self.world.nodes)],
-                    "cstr_obstacle": [obstacle.split("-")[0] for drone in self.world.nodes],
-                    "cstr_obstacle_id": [obstacle.split("-")[1] for drone in self.world.nodes],
-                    "cflt_distance_to_obstacle": [dist for dist in obs_distance_norm],
-                    "cflt_distance_to_buffer": obs_distance_buffer,
-                    "cint_collisions": collisions,
-                    "cint_collision_penalties": collision_pen,
-                    "cint_risk": risks,
-                    "cint_buffer_penalty": buffer_penalty,
-                    "cflt_midpoint_dists": [dist[1] for dist in obs_midpoint_distance],
-                    # New, not added to db as of 11/15
-                    "cflt_nearest_boundary_dist": [dist[1] for dist in obs_boundary_distance],
-                    "cflt_midpoint_to_boundary": boundary_midpoint
-                })
-                distance_data.append(df)
-            dfs = pd.concat(distance_data)
-            numeric_cols = [col for col in dfs.columns if col.startswith(("cflt", "cint"))]
-            dfs[numeric_cols] = dfs[numeric_cols].apply(pd.to_numeric, errors="coerce")
-            dfs = dfs.fillna(0)
-
-            self.obstacle_df = dfs.groupby("cint_drone_id", as_index=False).agg(
-                {"cflt_distance_to_obstacle": "min",
-                 "cint_collisions": "sum",
-                 "cint_risk": "sum",
-                 "cint_collision_penalties": "sum",
-                 "cint_buffer_penalty": "sum",
-                 "cflt_midpoint_dists": "sum",
-                 "cflt_nearest_boundary_dist": "sum",
-                 "cflt_midpoint_to_boundary": "sum"}
-
-            )
-            self.obstacle_df["cflt_improvement_multiplier"] = [
-                (row["cflt_nearest_boundary_dist"] / row["cflt_midpoint_to_boundary"]) if row[
-                                                                                              "cint_collisions"] > 0 else 1
-                for i, row in self.obstacle_df.iterrows()]
-
-            self.obstacle_df["cflt_improvement_multiplier"] = self.obstacle_df["cflt_improvement_multiplier"].fillna(0)
-            self.obstacle_df.replace([np.inf, -np.inf], 1, inplace=True)
-            self.map_data = self.map_data.drop('obstacles', axis=1)
-        else:
-            self.obstacle_df = pd.DataFrame({
-                    "cint_drone_id": [i for i, el in enumerate(self.world.nodes)],
-                    "cflt_distance_to_obstacle": [0 for i, el in enumerate(self.world.nodes)],
-                    "cflt_distance_to_buffer": [0 for i, el in enumerate(self.world.nodes)],
-                    "cint_collisions": [0 for i, el in enumerate(self.world.nodes)],
-                    "cint_collision_penalties": [0 for i, el in enumerate(self.world.nodes)],
-                    "cint_risk": [0 for i, el in enumerate(self.world.nodes)],
-                    "cint_buffer_penalty": [0 for i, el in enumerate(self.world.nodes)],
-                    "cflt_midpoint_dists": [0 for i, el in enumerate(self.world.nodes)],
-                    "cflt_nearest_boundary_dist": [0 for i, el in enumerate(self.world.nodes)],
-                    "cflt_midpoint_to_boundary": [0 for i, el in enumerate(self.world.nodes)],
-                    "cflt_improvement_multiplier": [0 for i, el in enumerate(self.world.nodes)]
-                })
-
     def get_collision_data2(self):
         if len(self.map_data) > 0:
             self.map_data['obstacles'] = [f"{i}-{j}" for i, j in
@@ -310,11 +181,11 @@ class OutputWrapper(gym.Wrapper):
                 obstacles = [obs for drone in self.world.nodes]
                 risk = [data['cflt_obstacle_risk'].iloc[0] for drone in self.world.nodes]
                 collisions = [1 if u.check_for_collision(drone, data)[0] else 0 for drone in self.world.nodes]
-                print(f"--- Collisions: {collisions}")
+                # print(f"--- Collisions: {collisions}")
                 collision_penalty = [self.rai_params["collision_penalty"] * coll for coll in collisions]
-                print(f"--- Penalties: {collision_penalty}")
+                # print(f"--- Penalties: {collision_penalty}")
                 distance = [u.check_for_collision(drone, data)[1] for drone in self.world.nodes]
-                print(f"--- Distances: {distance}")
+                # print(f"--- Distances: {distance}")
                 buffer_distance = [0 if u.check_for_collision(drone, data)[1] > self.rai_params['buffer_zone_size'] else u.check_for_collision(drone, data)[1] for drone in self.world.nodes]
                 buffer_penalty = [(self.rai_params['buffer_zone_size'] - buff_dist)/self.rai_params['buffer_zone_size'] if buff_dist > 0 else 0 for buff_dist in buffer_distance]
                 dist_to_boundary = [u.check_for_collision(drone, data)[2] if u.check_for_collision(drone, data)[0] else 0 for drone in self.world.nodes]
@@ -373,107 +244,157 @@ class OutputWrapper(gym.Wrapper):
                 "cflt_midpoint_to_boundary": [0 for i, el in enumerate(self.world.nodes)],
                 "cflt_improvement_multiplier": [0 for i, el in enumerate(self.world.nodes)]
             })
+
     def get_rai_reward(self, actions):
         self.get_collision_data2()
-        all_distances = U.get_upper_triangle(self.world.distance_matrix, subtract_from_diagonal=-1)
-        all_distances_cap = np.where(all_distances > self.comm_radius, self.comm_radius, all_distances)
-        all_distances_cap_norm = all_distances_cap / self.comm_radius  # (self.world_size * np.sqrt(2) / 2)
-
-        distances_to_target = np.linalg.norm(self.world.agent_states[:, :2] - self.target_point, axis=1)
-        mean_distance_to_target = np.mean(distances_to_target)
-        target_distance_reward = -mean_distance_to_target / self.world_size
-
-        dist_rew = np.mean(all_distances_cap_norm)
-        action_pen = 0.001 * np.mean(actions ** 2)
-
-        # RAI penalties
-        ## Minimize obstacle proximity
-        drone_obstacle_proximity = sum(self.obstacle_df["cflt_distance_to_obstacle"].to_numpy())
-        drone_obstacle_proximity_cap = np.where(drone_obstacle_proximity > self.comm_radius, self.comm_radius, drone_obstacle_proximity)
-        drone_obstacle_proximity_cap_norm = drone_obstacle_proximity_cap / self.comm_radius
-        drone_obstacle_proximity_rew = np.mean(drone_obstacle_proximity_cap_norm)
-
-        ## Avoid Basic Collision
-        collision_pen = self.obstacle_df["cint_collision_penalties"].to_numpy()
-
-        ## Avoid Buffer Zone
-        all_buffer_penalties = self.obstacle_df["cint_buffer_penalty"].to_numpy()
-
-        # RAI Coefficients
-        ## Avoid Collisions?
-        avoid_collisions = 1 if self.rai_params["avoid_collisions"]== 1 else 0
-
-        ## Avoid buffer zones?
-        avoid_buffer_zones = 1 if self.rai_params["avoid_buffer_zones"] == 1 else 0
-
-        ## Improvement Multiplier
-        improvement_multiplier = self.obstacle_df["cflt_improvement_multiplier"].to_numpy()
-        collis = self.obstacle_df["cint_collisions"].to_numpy()
-        drone_to_bound = self.obstacle_df["cflt_nearest_boundary_dist"].to_numpy()
-        mid_to_bound = self.obstacle_df["cflt_midpoint_to_boundary"].to_numpy()
-
-        # Final RAI term
-        rai = avoid_collisions*sum((collision_pen)*improvement_multiplier) + avoid_buffer_zones*sum(all_buffer_penalties)
-
-        # r = - dist_rew - action_pen - rai - drone_obstacle_proximity_rew
-        r = - target_distance_reward - action_pen - rai - drone_obstacle_proximity_rew
-        r = np.ones((self.nr_agents,)) * r
-
-        return r
-
-    def rai_reward_data(self, actions):
-        self.get_collision_data2()
+        # Interdrone Distance
         all_distances = U.get_upper_triangle(self.world.distance_matrix, subtract_from_diagonal=-1)
         all_distances_cap = np.where(all_distances > self.comm_radius, self.comm_radius, all_distances)
         all_distances_cap_norm = all_distances_cap / self.comm_radius
-
-        distances_to_target = np.linalg.norm(self.world.agent_states[:, :2] - self.target_point, axis=1)
-        mean_distance_to_target = np.mean(distances_to_target)
-        target_distance_reward = -mean_distance_to_target / self.world_size
-
         dist_rew = np.mean(all_distances_cap_norm)
         action_pen = 0.001 * np.mean(actions ** 2)
 
-        # RAI penalties
+
+        # Distance to Target
+        distances_to_target = np.linalg.norm(self.world.agent_states[:, :2] - self.target_point, axis=1)
+        distances_to_target_cap = np.where(distances_to_target > self.comm_radius, self.comm_radius,
+                                           distances_to_target)
+        distances_to_target_cap_norm = distances_to_target_cap / self.comm_radius
+        mean_distance_to_target = np.mean(distances_to_target_cap_norm)
+        target_distance_reward = mean_distance_to_target / self.world_size
+
+
+
+        # Directional Reward -- how well are the drones' trajectories aligned to the target?
+        # Directional Reward with Smoothing
+        direction_to_target = self.target_point - self.world.agent_states[:, :2]
+        direction_norm = np.linalg.norm(direction_to_target, axis=1) + 1e-6
+        direction_unit_vector = direction_to_target / direction_norm[:, None]
+
+        # Smooth actions by normalizing
+        actions_norm = np.linalg.norm(actions[:, :2], axis=1) + 1e-6
+        actions_unit_vector = actions[:, :2] / actions_norm[:, None]
+
+        # Compute alignment and smooth
+        alignment = np.sum(actions_unit_vector * direction_unit_vector, axis=1)
+        directional_reward = np.mean(alignment)
+
+        # Target Reached Bonus
+        threshold = 1.0  # Define a threshold for "reaching" the target
+        target_reached = np.linalg.norm(self.world.agent_states[:, :2] - self.target_point, axis=1) < threshold
+        target_bonus = np.sum(target_reached) * 10
+
+        proximity_bonus = np.mean(np.exp(-0.5 * np.linalg.norm(self.world.agent_states[:, :2] - self.target_point, axis=1)))
+
+        # Obstacle Proximity Penalty
+        obstacle_penalty = np.mean(
+        np.maximum(0, self.rai_params['buffer_zone_size'] - self.obstacle_df["cflt_distance_to_obstacle"]))
+
+        # RAI
         ## Minimize obstacle proximity
-        drone_obstacle_proximity = sum(self.obstacle_df["cflt_distance_to_obstacle"].to_numpy())
+        drone_obstacle_proximity = self.obstacle_df["cflt_distance_to_obstacle"].to_numpy()
         drone_obstacle_proximity_cap = np.where(drone_obstacle_proximity > self.comm_radius, self.comm_radius,
                                                 drone_obstacle_proximity)
         drone_obstacle_proximity_cap_norm = drone_obstacle_proximity_cap / self.comm_radius
         drone_obstacle_proximity_rew = np.mean(drone_obstacle_proximity_cap_norm)
 
-        ## Avoid Basic Collision
+        ## Avoid Collisions?
+        avoid_collisions = 1 if self.rai_params["avoid_collisions"] == True else 0
+        ## Collision Penalty
         collisions = self.obstacle_df["cint_collisions"].to_numpy()
         obs_distance = self.obstacle_df["cflt_distance_to_obstacle"].to_numpy()
         collision_pen = self.obstacle_df["cint_collision_penalties"].to_numpy()
-
-        ## Avoid Buffer Zone
-        all_buffer_penalties = self.obstacle_df["cint_buffer_penalty"].to_numpy()
-
-        # RAI Coefficients
-        ## Avoid Collisions?
-        avoid_collisions = 1 if self.rai_params["avoid_collisions"] == True else 0
-
+        collision_penalty = np.sum(self.obstacle_df["cint_collision_penalties"])
         ## Avoid buffer zones?
         avoid_buffer_zones = 1 if self.rai_params["avoid_buffer_zones"] == True else 0
+        ## Buffer Zone Penalty
+        buffer_penalty = np.sum(self.obstacle_df["cint_buffer_penalty"])
 
+        # print(f'Directional Reward: {directional_reward}')
+        # print(f'Distance Reward: {target_distance_reward}')
+        target_r = ((0.8 * directional_reward) - (0.2 * target_distance_reward))
+        #target_r = - target_distance_reward
+        # print(f'Target_r: {target_r}')
+        # print(f'Collision Penalty: {collision_penalty}; Avoid? {avoid_collisions}')
+        # print(f'Buffer Penalty: {buffer_penalty}; Avoid? {avoid_buffer_zones}')
+        rai_r = (collision_penalty * avoid_collisions) + (buffer_penalty * avoid_buffer_zones)
+        # print(f'RAI_r: {rai_r}')
+        # Combine Rewards
+        #r = ((0.7) * target_r) - ((0.3) * rai_r)
+        r = (target_r - action_pen - rai_r + proximity_bonus)
+        # print(f'Total Reward: {r}')
+        # Per-Agent Reward
+        r = np.ones((self.nr_agents,)) * r
+        return r
+
+    def rai_reward_data(self, actions):
+        self.get_collision_data2()
+        # Interdrone Distance
+        all_distances = U.get_upper_triangle(self.world.distance_matrix, subtract_from_diagonal=-1)
+        all_distances_cap = np.where(all_distances > self.comm_radius, self.comm_radius, all_distances)
+        all_distances_cap_norm = all_distances_cap / self.comm_radius
+        dist_rew = np.mean(all_distances_cap_norm)
+        action_pen = 0.001 * np.mean(actions ** 2)
+
+        # Distance to Target
+        distances_to_target = np.linalg.norm(self.world.agent_states[:, :2] - self.target_point, axis=1)
+        distances_to_target_cap = np.where(distances_to_target > self.comm_radius, self.comm_radius,
+                                           distances_to_target)
+        distances_to_target_cap_norm = distances_to_target_cap / self.comm_radius
+        mean_distance_to_target = np.mean(distances_to_target_cap_norm)
+        target_distance_reward = mean_distance_to_target / self.world_size
+
+        # Directional Reward -- how well are the drones' trajectories aligned to the target?
+        direction_to_target = self.target_point - self.world.agent_states[:, :2]
+        direction_norm = np.linalg.norm(direction_to_target, axis=1) + 1e-6
+        direction_norm = direction_norm[:, None]
+        directional_reward = np.mean(np.sum((actions[:, :2] * direction_to_target) / direction_norm, axis=1))
+
+        # Target Reached Bonus
+        threshold = 1.0  # Define a threshold for "reaching" the target
+        target_reached = np.linalg.norm(self.world.agent_states[:, :2] - self.target_point, axis=1) < threshold
+        target_bonus = np.sum(target_reached) * 10
+
+        # Obstacle Proximity Penalty
+        obstacle_penalty = np.mean(
+            np.maximum(0, self.rai_params['buffer_zone_size'] - self.obstacle_df["cflt_distance_to_obstacle"]))
+
+        # RAI
+        ## Minimize obstacle proximity
+        drone_obstacle_proximity = self.obstacle_df["cflt_distance_to_obstacle"].to_numpy()
+        drone_obstacle_proximity_cap = np.where(drone_obstacle_proximity > self.comm_radius, self.comm_radius,
+                                                drone_obstacle_proximity)
+        drone_obstacle_proximity_cap_norm = drone_obstacle_proximity_cap / self.comm_radius
+        drone_obstacle_proximity_rew = np.mean(drone_obstacle_proximity_cap_norm)
+        ## Avoid Collisions?
+        avoid_collisions = 1 if self.rai_params["avoid_collisions"] == True else 0
+        ## Collision Penalty
+        collisions = self.obstacle_df["cint_collisions"].to_numpy()
+        obs_distance = self.obstacle_df["cflt_distance_to_obstacle"].to_numpy()
+        collision_pen = self.obstacle_df["cint_collision_penalties"].to_numpy()
+        collision_penalty = np.sum(self.obstacle_df["cint_collision_penalties"])
+        ## Avoid buffer zones?
+        avoid_buffer_zones = 1 if self.rai_params["avoid_buffer_zones"] == True else 0
+        ## Buffer Zone Penalty
+        buffer_penalty = np.sum(self.obstacle_df["cint_buffer_penalty"])
         ## Improvement Multiplier
         improvement_multiplier = self.obstacle_df["cflt_improvement_multiplier"].to_numpy()
 
         ## Drone Damage
         drone_damage = self.obstacle_df["cint_collision_penalties"].to_numpy()
         # Final RAI term
-        rai =  avoid_collisions * sum((collision_pen) * improvement_multiplier) + avoid_buffer_zones * sum(all_buffer_penalties)
+        rai =  (collision_penalty * avoid_collisions) - (buffer_penalty * avoid_buffer_zones)
 
         rai_data = {
             "cflt_distance_reward": dist_rew,
+            "cflt_direction_reward": directional_reward,
             "cflt_target_distance_reward": target_distance_reward,
             "cflt_action_penalty": action_pen,
             "cflt_rai_reward": rai,
-            "cflt_basic_collision_penalty": collision_pen,
-            "cint_buffer_zone_entry_penalty": all_buffer_penalties,
+            "cflt_basic_collision_penalty": (collision_penalty * avoid_collisions),
+            "cint_buffer_zone_entry_penalty": (buffer_penalty * avoid_buffer_zones),
             "cint_all_collisions": collisions,
-            "cflt_obstacle_distance": obs_distance,
+            "cflt_obstacle_distance": drone_obstacle_proximity_cap_norm,
             "cflt_improvement_multiplier": improvement_multiplier,
             "cflt_drone_damage": drone_damage
         }
@@ -487,18 +408,6 @@ class OutputWrapper(gym.Wrapper):
         reward = self.get_rai_reward(action)
         rai_reward = self.rai_reward_data(action)
 
-        check_status()
-        print("----------------------------------------------")
-        print(f"Reward: {reward}")
-        print(f"RAI: {rai_reward['cflt_rai_reward']}")
-        print(f"Collision Penalty: {rai_reward['cflt_basic_collision_penalty']}")
-        print(f"Buffer Penalty: {rai_reward['cint_buffer_zone_entry_penalty']}")
-        print(f"All Collisions: {rai_reward['cint_all_collisions']}")
-        print(f"Obstacle Distance: {rai_reward['cflt_obstacle_distance']}")
-        print(f"Improvement Multiplier: {rai_reward['cflt_improvement_multiplier']}")
-        print(f"Drone Damage: {rai_reward['cflt_drone_damage']}")
-
-
 
         log_entry = {
             "cint_n_drones": self.env.nr_agents,
@@ -510,40 +419,54 @@ class OutputWrapper(gym.Wrapper):
             "actions": info["actions"],
             "cflt_reward": reward,
             "cflt_distance_reward": rai_reward["cflt_distance_reward"],
+            "cflt_direction_reward": rai_reward["cflt_direction_reward"],
             "cflt_target_distance_reward": rai_reward["cflt_target_distance_reward"],
             "cflt_action_penalty": rai_reward["cflt_action_penalty"],
+            "cflt_collision_penalty": rai_reward["cflt_basic_collision_penalty"],
+            "cflt_buffer_penalty": rai_reward["cint_buffer_zone_entry_penalty"],
             "cint_all_collisions": rai_reward["cint_all_collisions"],
             "cflt_drone_obstacle_distance": rai_reward["cflt_obstacle_distance"],
             "cflt_improvement_multiplier": rai_reward["cflt_improvement_multiplier"],
-            "cflt_drone_damage": rai_reward["cflt_drone_damage"]
+            "cflt_drone_damage": rai_reward["cflt_drone_damage"],
+            "cstr_model_status": self.status_for_db()
         }
 
         self.log_data.append(log_entry)
         self.episode_rewards.append(reward)
-        #self.run_data.append(run_entry)
+
         self.episode += 1
         update_episode(self.episode)
         print(f'On episode: {self.episode}', flush=True)
-        if check_status():
-            print(f"Model paused at episode {self.episode}.", flush=True)
+        if check_pause():
+            print(f"Model paused at episode {self.episode - 1}.", flush=True)
             self.batched_commits()
             update_db("commit")
-            while check_status():
+            while check_pause():
                 time.sleep(1)  # Wait until pause flag is cleared
             print("Model resumed.", flush=True)
-
-        # Batch output for mid-run database commits
-        if self.episode == 1:
-            self.run_parameters()
-
-        if self.episode % 10 == 0:
-            if self.episode == 10:
-                self.batched_commits()
-            else:
-                self.batched_commits(first=False)
+        if check_stop():
+            print(f"Model stopped at episode {self.episode - 1}.", flush=True)
+            self.batched_commits()
             update_db("commit")
 
-        # time.sleep(0.25)
+        # Batch output for mid-run database commits
+        if self.run_type == "app":
+            if self.episode == 1:
+                self.run_parameters()
+
+            if self.episode % 10 == 0:
+                if self.episode == 10:
+                    self.batched_commits()
+                else:
+                    self.batched_commits(first=False)
+                update_db("commit")
+        elif self.run_type == "api":
+            if self.episode == self.time_limit:
+                self.batched_commits(first=False)
+                update_db("commit")
+
+
+        #time.sleep(0.25)
         return next_state, reward, done, info
 
     def close(self):
@@ -555,23 +478,31 @@ class OutputWrapper(gym.Wrapper):
         output.generate_tables()
         output.pickle_tables()
         reset_status()
+
+        try:
+            self.batched_commits(first=False)
+            print("Final data committed to the database.")
+        except Exception as e:
+            print(f"Error committing final data: {str(e)}")
+
         update_episode(0)
         update_db("commit")
         super(OutputWrapper, self).close()
 
+
     def batched_commits(self, first=True):
         print("Batching output....")
         if first:
-            print(self.map_data)
             out = xo.OutputObject(self.log_data, self.param_data, self.all_map_data, self.rai_data)
             out.generate_tables()
             out.pickle_tables()
-            self.log_data = []
+
         else:
             out = xo.OutputObject(self.log_data, [], [], [])
             out.generate_tables()
             out.pickle_tables()
-            self.log_data = []
+
+        self.log_data = []
         print("Batch is pickled")
 
 

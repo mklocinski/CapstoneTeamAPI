@@ -2,7 +2,7 @@ import random as r
 import pandas as pd
 import numpy as np
 import pygame
-import math
+import ast
 
 # from pygame.draw.rect(self.screen, self.building_color, (x, y, 40, 40))
 def rectangle(map, color, rect):
@@ -333,6 +333,9 @@ class EnvironmentMap:
                                  obs_pos.append(pos)
                                  existing_positions.append(pos)
                          self.obstacles[key]["positions"] = obs_pos
+                     else:
+                         pos_tuple = [ast.literal_eval(coord) for coord in self.obstacles[key]["positions"]]
+                         self.obstacles[key]["positions"] = pos_tuple
                      self.obstacle_coords2(key, rg)
          if self.dataframe is None:
              self.dataframe = pd.DataFrame(columns=[

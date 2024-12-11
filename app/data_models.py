@@ -23,8 +23,9 @@ class tbl_status(db.Model):
 class tbl_model_runs(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     cflt_run_id = db.Column(db.Float, primary_key=False)
-    cdtm_run_date = db.Column(db.Date, unique=False, nullable=False)
-    cbln_terminal_episode = db.Column(db.Boolean, unique=False, nullable=False)
+    cdtm_run_date = db.Column(db.Date, unique=False)
+    cint_episode = db.Column(db.Integer, unique=False)
+    cstr_model_status = db.Column(db.String, unique=False)
 
 
 class tbl_model_run_params(db.Model):
@@ -85,7 +86,10 @@ class tbl_rewards(db.Model):
     cint_episode_id = db.Column(db.Integer, primary_key=False)
     cflt_reward = db.Column(db.Float, unique=False, nullable=False)
     cflt_distance_reward = db.Column(db.Float, unique=False)
+    cflt_direction_reward = db.Column(db.Float, unique=False)
     cflt_action_penalty = db.Column(db.Float, unique=False)
+    cflt_collision_penalty = db.Column(db.Float, unique=False)
+    cflt_buffer_penalty = db.Column(db.Float, unique=False)
     cflt_target_distance_reward = db.Column(db.Float, unique=False)
     cint_all_collisions = db.Column(db.Integer, primary_key=False)
     cflt_drone_obstacle_distance = db.Column(db.Float, unique=False)

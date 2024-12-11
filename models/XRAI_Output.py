@@ -1,7 +1,8 @@
 import time
 import pandas as pd
+import numpy as np
 import pickle
-
+import os
 
 # -------------------------------------------------------------------------- #
 # -------------- OutputObject: converts output to DataFrames --------------- #
@@ -22,12 +23,17 @@ class OutputObject:
 
         if self.output is not None:
             if len(self.output) > 0:
-                run_date = self.output[0]["cdtm_run_date"]
-                terminal_episode = [self.output[i]["cbln_terminal"] for i in range(len(self.output))].index(False)
-                end_time = time.time()
-                query_duration = end_time - start_time
-                print(f"make_tbl_model_runs duration: {query_duration:.2f} seconds")
-                return pd.DataFrame({"cdtm_run_date": [run_date], "cbln_terminal_episode": [terminal_episode]})
+                for episode in range(len(self.output)):
+                    if self.output[episode]["cstr_model_status"] in ["model run initiated", "paused", "stopped"]:
+                        run_date = self.output[episode]["cdtm_run_date"]
+                        status = self.output[episode]["cstr_model_status"]
+                        episode = self.output[episode]["cint_episode"]
+                        end_time = time.time()
+                        query_duration = end_time - start_time
+                        #print(f"make_tbl_model_runs duration: {query_duration:.2f} seconds")
+                        return pd.DataFrame({"cdtm_run_date": [run_date],
+                                             "cint_episode": [episode],
+                                             "cstr_model_status": [status]})
 
     def make_tbl_model_run_params(self):
         start_time = time.time()
@@ -52,7 +58,7 @@ class OutputObject:
                   'cint_vf_stepsize': self.params['vf_stepsize']}
             end_time = time.time()
             query_duration = end_time - start_time
-            print(f"make_tbl_model_run_params duration: {query_duration:.2f} seconds")
+            #print(f"make_tbl_model_run_params duration: {query_duration:.2f} seconds")
             return pd.DataFrame(ps, index=[0])
 
     def make_tbl_local_state(self):
@@ -86,7 +92,7 @@ class OutputObject:
 
             end_time = time.time()
             query_duration = end_time - start_time
-            print(f"make_tbl_local_state duration: {query_duration:.2f} seconds")
+            #print(f"make_tbl_local_state duration: {query_duration:.2f} seconds")
             return pd.DataFrame({
                 "cint_episode_id": episodes,
                 "cint_drone_id": drones,
@@ -103,13 +109,13 @@ class OutputObject:
 
     def make_tbl_global_state(self):
         start_time = time.time()
-        print(f"Map Output Length: {len(self.output)}")
+        #print(f"Map Output Length: {len(self.output)}")
         if len(self.output) > 0:
             episode_id = [i for i in range(len(self.output))]
             state_encoding = [";".join(self.output[i]["cstr_global_state"]) for i in range(len(self.output))]
             end_time = time.time()
             query_duration = end_time - start_time
-            print(f"make_tbl_global_state duration: {query_duration:.2f} seconds")
+            #print(f"make_tbl_global_state duration: {query_duration:.2f} seconds")
             return pd.DataFrame({"cint_episode_id": episode_id, "cstr_state_encoding": str(state_encoding)})
 
     def make_tbl_drone_actions(self):
@@ -128,7 +134,7 @@ class OutputObject:
                     angular_velocity.append(self.output[episode]["actions"][drone][1])
             end_time = time.time()
             query_duration = end_time - start_time
-            print(f"make_tbl_drone_actions duration: {query_duration:.2f} seconds")
+            #print(f"make_tbl_drone_actions duration: {query_duration:.2f} seconds")
             return pd.DataFrame({
                 "cint_episode_id": episodes,
                 "cint_drone_id": drones,
@@ -142,25 +148,26 @@ class OutputObject:
         if len(self.output) > 0:
             episodes = [self.output[i]["cint_episode"] for i in range(len(self.output))]
             rewards = [self.output[i]["cflt_reward"][0] for i in range(len(self.output))]
-            # New
             target_dist = [self.output[i]["cflt_target_distance_reward"] for i in range(len(self.output))]
+            direct_dist = [self.output[i]["cflt_direction_reward"] for i in range(len(self.output))]
             dist = [self.output[i]["cflt_distance_reward"] for i in range(len(self.output))]
             action = [self.output[i]["cflt_action_penalty"] for i in range(len(self.output))]
-            # New
-            collisions = [self.output[i]["cint_all_collisions"] for i in range(len(self.output))]
-            # New
-            obstacle_dist = [self.output[i]["cflt_drone_obstacle_distance"] for i in range(len(self.output))]
-            # New
-            improvement = [self.output[i]["cflt_improvement_multiplier"] for i in range(len(self.output))]
-
+            col_pen = [self.output[i]["cflt_collision_penalty"] for i in range(len(self.output))]
+            buf_pen = [self.output[i]["cflt_buffer_penalty"] for i in range(len(self.output))]
+            collisions = [sum(self.output[i]["cint_all_collisions"]) for i in range(len(self.output))]
+            obstacle_dist = [np.mean(self.output[i]["cflt_drone_obstacle_distance"]) for i in range(len(self.output))]
+            improvement = [sum(self.output[i]["cflt_improvement_multiplier"]) for i in range(len(self.output))]
             end_time = time.time()
             query_duration = end_time - start_time
-            print(f"make_tbl_rewards duration: {query_duration:.2f} seconds")
+            #print(f"make_tbl_rewards duration: {query_duration:.2f} seconds")
             return pd.DataFrame({"cint_episode_id": episodes,
                                  "cflt_reward": rewards,
                                  "cflt_distance_reward":dist,
+                                 "cflt_direction_reward":direct_dist,
                                  "cflt_target_distance_reward": target_dist,
                                  "cflt_action_penalty":action,
+                                 "cflt_collision_penalty": col_pen,
+                                 "cflt_buffer_penalty": buf_pen,
                                  "cint_all_collisions":collisions,
                                  "cflt_drone_obstacle_distance": obstacle_dist,
                                  "cflt_improvement_multiplier": improvement})
@@ -172,7 +179,7 @@ class OutputObject:
         if len(self.map_df) > 0:
             end_time = time.time()
             query_duration = end_time - start_time
-            print(f"make_tbl_map_data duration: {query_duration:.2f} seconds")
+            #print(f"make_tbl_map_data duration: {query_duration:.2f} seconds")
             return self.map_df
 
     def make_tbl_rai(self):
@@ -185,7 +192,7 @@ class OutputObject:
              "cflt_buffer_zone_size", "cflt_buffer_entry_penalty", "cint_expected_completion_time",
              "cflt_swarm_damage_tolerance","cflt_drone_damage_tolerance"]
             self.rai_df.columns = col_names
-            print(f"make_tbl_rai duration: {query_duration:.2f} seconds")
+            #print(f"make_tbl_rai: {self.rai_df.columns}")
             return self.rai_df
 
     def make_tbl_run_status(self):
@@ -198,7 +205,7 @@ class OutputObject:
                 start_time = time.time()
                 end_time = time.time()
                 query_duration = end_time - start_time
-                print(f"make_tbl_run_status duration: %.2f seconds", query_duration)
+                #print(f"make_tbl_run_status duration: %.2f seconds", query_duration)
                 return pd.DataFrame({"cint_episode_id": episodes,
                                      "cstr_run_status": status,
                                      "cdtm_status_timestamp": time})
@@ -217,8 +224,49 @@ class OutputObject:
         }
 
     def pickle_tables(self):
-        with open("utils/pickles/model_output.pkl", "wb") as f:
-            pickle.dump(self.tables, f)
+        # File path for the pickle file
+        pickle_file_path = "utils/pickles/model_output.pkl"
 
-        print("Model output pickled")
+        # Load existing data if the file exists
+        if os.path.exists(pickle_file_path):
+            with open(pickle_file_path, "rb") as f:
+                try:
+                    existing_data = pickle.load(f)
+                    print("Existing pickle data loaded")
+                except Exception as e:
+                    print(f"Error loading existing pickle file: {e}")
+                    existing_data = {}
+        else:
+            existing_data = {}
+
+        # Merge existing data with the new data
+        for table_name, table_data in self.tables.items():
+            if table_name in existing_data:
+                # Handle cases where the existing data is None
+                if existing_data[table_name] is None:
+                    existing_data[table_name] = table_data
+                else:
+                    # Append new data to the existing table data (if applicable)
+                    if table_data is not None:
+                        if isinstance(table_data, pd.DataFrame) and isinstance(existing_data[table_name], pd.DataFrame):
+                            # Concatenate DataFrames
+                            existing_data[table_name] = pd.concat([existing_data[table_name], table_data],
+                                                                  ignore_index=True)
+                        elif isinstance(table_data, list):
+                            # Extend lists
+                            existing_data[table_name].extend(table_data)
+                        else:
+                            # Append other types of data
+                            existing_data[table_name].append(table_data)
+            else:
+                # Add the new table to the existing data
+                existing_data[table_name] = table_data
+
+        # Save the updated data back to the pickle file
+        with open(pickle_file_path, "wb") as f:
+            pickle.dump(existing_data, f)
+
+        print("Model output pickled with merged data")
+
+
 
