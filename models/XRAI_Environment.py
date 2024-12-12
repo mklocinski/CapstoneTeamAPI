@@ -252,6 +252,7 @@ class OutputWrapper(gym.Wrapper):
         all_distances_cap = np.where(all_distances > self.comm_radius, self.comm_radius, all_distances)
         all_distances_cap_norm = all_distances_cap / self.comm_radius
         dist_rew = np.mean(all_distances_cap_norm)
+        var_dist_rew = np.var(all_distances)
         action_pen = 0.001 * np.mean(actions ** 2)
 
 
@@ -262,8 +263,6 @@ class OutputWrapper(gym.Wrapper):
         distances_to_target_cap_norm = distances_to_target_cap / self.comm_radius
         mean_distance_to_target = np.mean(distances_to_target_cap_norm)
         target_distance_reward = mean_distance_to_target / self.world_size
-
-
 
         # Directional Reward -- how well are the drones' trajectories aligned to the target?
         # Directional Reward with Smoothing
@@ -277,7 +276,14 @@ class OutputWrapper(gym.Wrapper):
 
         # Compute alignment and smooth
         alignment = np.sum(actions_unit_vector * direction_unit_vector, axis=1)
-        directional_reward = np.mean(alignment)
+        #directional_reward = np.mean(alignment)
+
+        # Angular Deviation Penalty
+        angles = np.arccos(np.clip(np.sum(actions_unit_vector * direction_unit_vector, axis=1), -1.0, 1.0))
+        angular_penalty = np.mean(angles)  # Smaller angles mean better alignment
+
+        # Reward term (negative penalty)
+        directional_reward = -angular_penalty
 
         # Target Reached Bonus
         threshold = 1.0  # Define a threshold for "reaching" the target
@@ -310,19 +316,11 @@ class OutputWrapper(gym.Wrapper):
         ## Buffer Zone Penalty
         buffer_penalty = np.sum(self.obstacle_df["cint_buffer_penalty"])
 
-        # print(f'Directional Reward: {directional_reward}')
-        # print(f'Distance Reward: {target_distance_reward}')
-        target_r = ((0.8 * directional_reward) - (0.2 * target_distance_reward))
-        #target_r = - target_distance_reward
-        # print(f'Target_r: {target_r}')
-        # print(f'Collision Penalty: {collision_penalty}; Avoid? {avoid_collisions}')
-        # print(f'Buffer Penalty: {buffer_penalty}; Avoid? {avoid_buffer_zones}')
+
+        target_r = - (0.5 * target_distance_reward) - (0.5 * var_dist_rew)
         rai_r = (collision_penalty * avoid_collisions) + (buffer_penalty * avoid_buffer_zones)
-        # print(f'RAI_r: {rai_r}')
         # Combine Rewards
-        #r = ((0.7) * target_r) - ((0.3) * rai_r)
-        r = (target_r - action_pen - rai_r + proximity_bonus)
-        # print(f'Total Reward: {r}')
+        r = target_r - rai_r
         # Per-Agent Reward
         r = np.ones((self.nr_agents,)) * r
         return r
