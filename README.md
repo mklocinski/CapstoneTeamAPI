@@ -1,7 +1,11 @@
-# Main Points
-- This API was created as part of a project that sought to apply XAI and RAI principles to an autonomous vehicle DRL
-- This API allows you to analyze the training of a drone swarm DRL with the option to adjust swarm parameters and responsibility constraints (i.e. don't hit obstacles)
-- You can run this without the [interface]((https://github.com/mklocinski/CapstoneTeamApp))
+<div style="background-color: #FFD580; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+<h1>Main Points</h1>
+<ul>
+<li>This API was created as part of a project that sought to apply XAI and RAI principles to an autonomous vehicle DRL</li>
+<li>This API allows you to analyze the training of a drone swarm DRL with the option to adjust swarm parameters and responsibility constraints (i.e. don't hit obstacles)</li>
+<li>You can run this without the <a href="https://github.com/mklocinski/CapstoneTeamApp">interface</a></li>
+</ul>
+</div>
 
 ## If you've arrived here from a GMU SEOR capstone course:
 Here are some functionalities that weren't fully addressed:
@@ -67,12 +71,84 @@ None, this is the code for the API. If you decide to use this along with the [in
 ## Endpoints
 
 ## Architecture
-
 ### High-Level Architecture Diagram 
-![Flow chart depicting the architecture of the XRAI System](/assets/app_architecture.png)
+```mermaid
+flowchart BT
+    subgraph user
+          User["User"]
+    end
+    subgraph API
+            subgraph app
+                init["/__init__.py"]
+                config["/config.py"]
+                datamodel["/data_model.py"]
+                routes["/routes.py"]
+            end
+            subgraph models["/models.py"]
+                runfile["/XRAI_Runfile.py"]
+                runmodel["/XRAI_Model.py"]
+                runenv["/XRAI_Environment.py"]
+                runoutput["/XRAI_Output.py"]
+                obstacle["/ObstacleGenerator.py"]
+                checkpoint["/CheckpointWrapper.py"]
+                DRLSS["/DRLSS Model"]
+            end
+            subgraph migrations["Database"]
+            end
+        end
+    subgraph UI
+            subgraph pages["/pages"]
+            main["/main.py"]
+            data["/data.py"]
+            about["/about.py"]
+            end
+            subgraph components["/components"]
+                navbar["/navbar.py"]
+                chat["/chat_with_assistant.py"]
+                cside["/collapsible_sidebar.py"]
+                viewer["/viewer.py"]
+                subgraph visuals["/visuals"]
+                    swarmview["/swarm_movements.py"]
+                    drone_traj["/drone_trajectories.py"]
+                    drone_health["/drone_health.py"]
+                    reward["/rewards.py"]
+                end
+                subgraph parameters["/parameters"]
+                    map["/map.py"]
+                    rai["/rai.py"]
+                    environment["/environment.py"]
+                    model["/model.py"]
+                    model["/chat.py"]
+                end
+            end
+        end
+    subgraph OpenAI
+        LLM["ChatGPT Assistant"]
+    end
+user<-->main
+chat-->main
+chat-->LLM
+cside-->main
+cside-->LLM
+swarmview-->viewer
+reward-->viewer
+drone_health-->viewer
+drone_traj-->viewer
+map<-->cside
+rai<-->cside
+environment<-->cside
+model<-->cside
+chat<-->cside
+cside-->routes
+datamodel-->migrations
+runfile-->runmodel
+runmodel-->migrations
+obstacle<-->runfile
+runoutput-->runmodel
+runenv-->runmodel
+DRLSS-->runenv
+```
 
-### Data Flow: User, UI, API
-![Flow chart depicting the flow of data from the user, to the UI, through to the API](/assets/app_data_flow.png)
 
 ### Sequence Diagram
 ```mermaid
