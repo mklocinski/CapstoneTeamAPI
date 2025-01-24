@@ -1,7 +1,7 @@
 # Main Points
 - This API was created as part of a project that sought to apply XAI and RAI principles to an autonomous vehicle DRL. It allows you to analyze the training of a drone swarm DRL with the option to adjust swarm parameters and responsibility constraints (i.e. don't hit obstacles)
 - This API was built with Flask, and integrates 
-  - a pre-existing deep reinforcement learning (DRL) model that simulating drone swarm missions,  
+  - a pre-existing deep reinforcement learning (DRL) model that simulates drone swarm missions,  
   - a wrapper class that applies responsibility constraints without altering the base DRL, 
   - and a PostgreSQL database designed to store data generated during model runs.
 - You can run this without the [interface]((https://github.com/mklocinski/CapstoneTeamApp))
