@@ -1,30 +1,27 @@
 # Main Points
-- This API was created as part of a project that sought to apply XAI and RAI principles to an autonomous vehicle DRL
-- This API allows you to analyze the training of a drone swarm DRL with the option to adjust swarm parameters and responsibility constraints (i.e. don't hit obstacles)
+- This API was created as part of a project that sought to apply XAI and RAI principles to an autonomous vehicle DRL. It allows you to analyze the training of a drone swarm DRL with the option to adjust swarm parameters and responsibility constraints (i.e. don't hit obstacles)
+- This API was built with Flask, and integrates 
+  - a pre-existing deep reinforcement learning (DRL) model that simulating drone swarm missions,  
+  - a wrapper class that applies responsibility constraints without altering the base DRL, 
+  - and a PostgreSQL database designed to store data generated during model runs.
 - You can run this without the [interface]((https://github.com/mklocinski/CapstoneTeamApp))
-
-## If you've arrived here from a GMU SEOR capstone course:
-Here are some functionalities that weren't fully addressed:
-  - For rendezvous missions, have the drones converge to a specified point (feature is technically already included but needs to be improved)
-  - The reward function can be further improved/played with. You'll note several variables that were tested but ultimately not included -- they just need more experimentation!
-  - A button to save and download the trained DRL 
-  - Try using a service like Redis to improve asynchronous task management
-
+- [Arrive here from a GMU SEOR Capstone Course?](#capstone-students)
 
 # Contents
 
 - [Project Description](#project-description)  
     - [Background](#background)
     - [App Description](#app-description)
-    - [Audience](#audience)
-    - [Use Cases](#use-cases)
 - [Authentication](#authentication)
 - [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
   - [How to Download](#how-to-download)
   - [How to Run](#how-to-run)
-  - [How to Deploy](#how-to-deploy)
 - [Endpoints](#Endpoints)
+  - [Request Bodies](#request-bodies)
+- [Database](#database)
 - [Architecture](#architecture)
+- [Contributing](#contributing)
 
 ## Project Description
 This API was created as part of a GMU SEOR capstone project. The project's focus was on taking a preexisting DRL model and making its output explainable (XAI) and responsible (RAI). An app was created to demonstrate the application of XAI and RAI on a DRL that runs autonomous drone swarm missions. 
@@ -50,11 +47,6 @@ DRL algorithms can effectively manage autonomous fleets, enabling them to comple
 
 This project used the Deep RL for Swarm Systems ([DRLSS](https://github.com/ALRhub/deep_rl_for_swarms/tree/master)) model to test out how RAI and XAI can be applied to an existing DRL model. The DRLSS was created by Maximilian Hüttenrauch, Adrian Šošić, and Gerhard Neumann to demonstrate the use of mean feature embeddings for state representation on a trust region policy optimization (TRPO) RL algorithm (here's the [Arxiv link](https://arxiv.org/abs/1807.06613) for their very interesting paper). The mean feature embedding approach helps overcome dimensionality issues inherent to drone swarms. Using TRPO limits the possibility of dynamic or unintuitive actions being selected, which can hinder interpretability. 
 
-
-### Audience
-
-### Use Cases
-
 ## Authentication
 None, this is the code for the API. If you decide to use this along with the [interface](https://github.com/mklocinski/CapstoneTeamApp), you will need your own OpenAI Assistant and OpenAI key. See its documentation for more details.
 
@@ -64,7 +56,7 @@ None, this is the code for the API. If you decide to use this along with the [in
 - **pip**
 - **Docker**
 
-### How to download
+### How to Download
 1. Make sure Docker Desktop is running
 2. Clone this repo to your local computer
 3. cd to `[clone location]/CapstoneTeamAPI`
@@ -388,3 +380,12 @@ sequenceDiagram
     OpenAI->>UI: Assistant Reponse
     UI->>User: Assistant Response
 ```
+## Contributing
+This repo will not be actively maintained, but you can reach out to me if you have any questions. 
+
+### Capstone Students
+Here are some functionalities that weren't fully addressed that would definitely improve this app:
+  - For rendezvous missions, have the drones converge to a specified point (feature is technically already included but needs to be improved)
+  - The reward function can be further improved/played with. You'll note several variables that were tested but ultimately not included -- they just need more experimentation!
+  - A button to save and download the trained DRL 
+  - Try using a service like Redis to improve asynchronous task management
