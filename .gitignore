@@ -1,0 +1,43 @@
+# Byte-compiled files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Distribution / Packaging
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Logs
+*.log
+
+# Cache
+*.cache/
+*.pytest_cache/
+.cache/
+
+# Environment Variables
+.env
+.env.*
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Test Coverage
+.coverage
+*.coverage.*
+
+# Django
+*.sqlite3
+db.sqli
+
+# Pycharm
+.idea/
