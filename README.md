@@ -109,7 +109,139 @@ docker-compose up
 http://localhost:[port you specified in the .env.local file]
 ```
 
+### Quick Start
+If using this API with the app interface, please refer to its [Getting Started](https://github.com/mklocinski/CapstoneTeamApp)
+This guide assumes you are running the API locally, and using a Python editor to interact with the API and its database.
+
+#### Run a drone mission
+```python
+import requests
+import pandas as pd
+
+params = {"nr_agents": 7,
+          "timesteps_per_batch": 20,
+          'buildings': {'count': 14, 'damage': 5, 'sizes': [2], 'random': 1, 'positions': ['None set']},
+          'avoid_collisions': True
+          }
+
+url = "https://localhost:[your-port]/database/last_n_runs/tbl_model_run_params"
+run = requests.post(url, params=params)
+
+# to monitor progress, you can periodically run "https://localhost:[your-port]/model/current_episode
+```
+
+#### Analyze data from previous missions/model runs
+```python
+# Last n runs to review
+params = {"n": 3} # 
+
+# Get run parameter data for last n runs
+url = "https://localhost:[your-port]/database/last_n_runs/tbl_model_run_params"
+model_param_data_json = requests.get(url, params=params)
+model_param_data = model_param_data_json.json() 
+model_param_data = pd.DataFrame(model_param_data)
+model_param_data = model_param_data[["cflt_run_id", "cint_nr_agents"]].drop_duplicates()
+
+# Get local state data for last n runs
+url = "https://localhost:[your-port]/database/last_n_runs/tbl_local_state"
+local_data_json = requests.get(url, params=params)
+local_data = local_data_json.json() 
+local_data = pd.DataFrame(local_data)
+
+# Get reward information for last n runs
+url = "https://localhost:[your-port]/last_n_runs/tbl_rewards"
+reward_data_json = requests.get(url, params=params)
+reward_data = reward_data_json.json() 
+reward_data = pd.DataFrame(reward_data)
+```
+
 ## Endpoints
+| Endpoint                 | Method | Description                                                                                                       | Example Request Body |
+|--------------------------|--------|-------------------------------------------------------------------------------------------------------------------|----------------------|
+| `/model/standard/run_xrai` | POST   | Runs a drone mission (model run) with parameters entered through the interface. **Requires an interface**         | See below            |
+| `/model/no_app/run_xrai` | POST   | Runs a drone mission (model run) with user-specified parameters. See below for list of parameters                 | See below            |
+| `/model/pause`           | GET    | Pauses the mission.                                                                                               | None                 |
+| `/model/play`            | GET    | Plays the mission (used to restart the mission after a pause).                                                    | None                 |
+| `/model/stop`            | GET    | Ends the mission.                                                                                                 | None                 |
+| `/model/current_episode` | GET    | Returns the current timestep.                                                                                     | None                 |
+| `/model/status`          | GET    | Returns the current status ("running", "paused", "complete").                                                     | None                 |
+| `/database/commit`       | GET    | Collects the data that has been incrementally saved over each timestep and commits it to the database.            | None                 |
+| `/database/last_run/tbl_model_runs` | GET    | Returns data from tbl_model_runs for the most recent model run. Click here for [database](#Database) information. | None                 |
+| `database/last_run/tbl_local_state` | GET    | Returns data from tbl_local for the most recent model run. Click here for [database](#Database) information.                   | None                 |
+| `/database/last_run/tbl_rewards` | GET    | Returns data from tbl_rewards for the most recent model run. Click here for [database](#Database) information.                 | None                 |
+| `/database/last_run/tbl_rai` | GET    | Returns data from tbl_rai for the most recent model run. Click here for [database](#Database) information.                     | None                 |
+| `/database/last_run/tbl_global_state` | GET    | Returns data from tbl_global_state for the most recent model run. Click here for [database](#Database) information.            | None                 |
+| `/database/last_run/tbl_drone_actions` | GET    | Returns data from tbl_drone_actions for the most recent model run. Click here for [database](#Database) information.           | None                 |
+| `/database/last_run/tbl_model_run_params` | GET    | Returns data from tbl_model_run_params for the most recent model run. Click here for [database](#Database) information.        | None                 |
+| `database/last_run/tbl_map_data` | GET    | Returns data from tbl_map_data for the most recent model run. Click here for [database](#Database) information.                | None                 |
+| `/api/get_run_id` | GET    | Returns the current (or most recent) model run's ID.                                                              | None                 |
+| `/database/last_n_runs/<string:table_name>` | GET    | Returns information from the entered table for the last n missions (model runs).                                  | None                 |
+
+### Request Bodies
+Only two endpoints, `/model/standard/run_xrai` and `/model/no_app/run_xrai`, require request bodies.
+- `/model/standard/run_xrai` is used by the interface, and receives the user parameters entered into the interface.
+- `/model/no_app/run_xrai` is designed for non-interface use. A user can run the API from a Python editor and enter their parameters into dictionaries.
+
+A complete list of user parameters, along with their definitions and valid values, can be viewed [here](https://github.com/mklocinski/CapstoneTeamApp/blob/main/assets/XRAI%20System%20-%20User%20Parameters.xlsx). 
+
+**Environment Parameters**
+```python
+{"environment_id": "Rendezvous",
+    "nr_agents": 20,
+    "obs_mode": "sum_obs_acc",
+    "comm_radius": 2,
+    "world_size": 100,
+    "distance_bins": 8,
+    "bearing_bins": 8,
+    "torus": False,
+    "dynamics": "unicycle_acc"}
+```
+**Model Parameters**
+```python
+{'timesteps_per_batch': 10,
+    'max_kl': 0.02,
+    'cg_iters': 10,
+    'cg_damping': 0.1,
+    'gamma': 0.95,
+    'lam': 0.95,
+    'vf_iters': 5,
+    'vf_stepsize': 0.001},
+```
+**Obstacle Parameters**
+```python
+{'target': {'target_x_coordinate': 20, 'target_y_coordinate': 20},
+    'humans': {'count': 1, 'damage': 10, 'sizes': [3], 'random': 1, 'positions': ['None set']},
+    'no_fly_zones': {'count': 1, 'damage': 10, 'sizes': [3], 'random': 1, 'positions': ['None set']},
+    'buildings': {'count': 1, 'damage': 10, 'sizes': [3], 'random': 1, 'positions': ['None set']},
+    'trees': {'count': 1, 'damage': 10, 'sizes': [3], 'random': 1, 'positions': ['None set']},
+    'animals': {'count': 1, 'damage': 10, 'sizes': [3], 'random': 1, 'positions': ['None set']},
+    'fires': {'count': 1, 'damage': 10, 'sizes': [3], 'random': 1, 'positions': ['None set']}}
+```
+**RAI Parameters**
+```python
+{'expected_completion_time': 10,
+    'swarm_damage_tolerance': 10,
+    'individual_drone_damage_tolerance': 10,
+    'avoid_collisions': False,
+    'avoid_buffer_zones': False,
+    'buffer_zone_size': False,
+    'collision_penalty': 10,
+    'buffer_entry_penalty': 10}
+```
+
+## Database
+A full data dictionary can be found [here](https://github.com/mklocinski/CapstoneTeamApp/blob/main/assets/DRL%20Data%20Dictionary.xlsx). 
+
+|Table Name     | Description                                                                                                                        |
+|---------------|------------------------------------------------------------------------------------------------------------------------------------|
+|tbl_model_runs| Record of each model run (mission), including run date, and the times at which the model was started, paused, played, and stopped. |
+|tbl_model_run_params| Record of all the parameter values for the DRLSS model                                                                             |
+|tbl_local_state| Contains state information, such as coordinates, velocity, and collisions, on each drone for each timestep.                        |
+|tbl_global_state| Contains the state encoding for each timestep.                                                                                     |
+|tbl_drone_actions| Contains the specific action (linear velocity, angular velocity) taken by each drone at each timestep.                             |
+|tbl_rewards| Contains all data used to calculate reward, including interdrone distance, total collision damage, etc.                            |
+|tbl_map_data| Contains the information on obstacles, including positions, types, and dimensions.                                                 |
+|tbl_rai| Contains the RAI parameter data for each model run (mission).                                                                      |
 
 ## Architecture
 ### High-Level Architecture Diagram 
