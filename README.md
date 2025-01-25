@@ -27,7 +27,7 @@
 This API was created as part of a GMU SEOR capstone project. The project's focus was on taking a preexisting DRL model and making its output explainable (XAI) and responsible (RAI). An app was created to demonstrate the application of XAI and RAI on a DRL that runs autonomous drone swarm missions. 
 
 ### Overview
-The app allows a user to execute the [DRLSS](#background) model, which can run either an autonomous rendezvous or an autonomous pursuit-evasion drone swarm mission, but with the ability to apply and test the impact of RAI constraints on drone swarm movement. The user can customize:
+This API is part of an X&RAI (XAI and RAI) system that allows a user to execute the [DRLSS](#background) model, which can run either an autonomous rendezvous or an autonomous pursuit-evasion drone swarm mission, but with the ability to apply and test the impact of RAI constraints on drone swarm movement. The user can customize:
 - the agents, by adjusting parameters like number of drones and drone physics
 - the environment, by adding in obstacles 
 - the reward, by specifying whether the drones need to avoid obstacles, or if they need to maintain a buffer distance around obstacles
