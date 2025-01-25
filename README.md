@@ -4,7 +4,7 @@
   - a pre-existing deep reinforcement learning (DRL) model that simulates drone swarm missions,  
   - a wrapper class that applies responsibility constraints without altering the base DRL, 
   - and a PostgreSQL database designed to store data generated during model runs.
-- You **can** run this without the [interface]((https://github.com/mklocinski/CapstoneTeamApp))
+- You **can** run this without the [interface](https://github.com/mklocinski/CapstoneTeamApp)
 - [Arrive here from a GMU SEOR Capstone Course?](#capstone-students)
 
 # Contents
